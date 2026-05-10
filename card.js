@@ -867,64 +867,62 @@ function buildPdfContent(container) {
   }
 }
 
-// Sound: ribbon tying — soft cloth swish (synthesized)
-function playRibbon() {
-  if (!audioCtx) return;
-  const dur = 0.5;
-  const sampleRate = audioCtx.sampleRate;
-  const buf = audioCtx.createBuffer(1, dur * sampleRate, sampleRate);
-  const data = buf.getChannelData(0);
-  for (let i = 0; i < data.length; i++) {
-    const t = i / data.length;
-    // Pink-ish noise with smooth bell envelope
-    data[i] = (Math.random() * 2 - 1) * Math.sin(t * Math.PI) * 0.6;
+// Draw a dotted/perforated tear line that progressively appears across
+// the paper canvas. Used during the rip phase before the paper lifts off.
+function drawTearLine(progress) {
+  const tearY = Math.round(PAPER_HEIGHT_PX * 0.55) + 10; // just below the type line
+  const dashLength = 14;
+  const gapLength = 6;
+  const totalDashes = Math.floor(PAPER_WIDTH_PX / (dashLength + gapLength));
+  const dashesToDraw = Math.floor(totalDashes * progress);
+  pctx.fillStyle = '#1a1410';
+  for (let i = 0; i < dashesToDraw; i++) {
+    const x = i * (dashLength + gapLength);
+    // Slight vertical wobble per dash for a hand-torn feel
+    const yJitter = ((i * 37) % 5) - 2;
+    pctx.fillRect(x, tearY + yJitter, dashLength, 3);
   }
-  const src = audioCtx.createBufferSource();
-  src.buffer = buf;
-  const filter = audioCtx.createBiquadFilter();
-  filter.type = 'lowpass';
-  filter.frequency.value = 2200;
-  const gain = audioCtx.createGain();
-  gain.gain.value = 0.18;
-  src.connect(filter).connect(gain).connect(audioCtx.destination);
-  src.start();
+  paperTexture.needsUpdate = true;
 }
 
 async function runPdfTransition() {
   if (!window.gsap) return;
   if (!scrollRoot) {
-    // No scroll asset — fall back to opening the print page directly
     console.warn('No scroll model loaded; opening print view directly');
     window.open('letter-print.html', '_blank');
     return;
   }
 
   // ===========================================================
-  // PHASE 1 — RIP: paper plane shakes + jolts up, scene dims
+  // PHASE 1 — TEAR: dotted perforation appears across the paper,
+  //           then the paper lifts away as if torn off.
   // ===========================================================
-  playRip();
-
+  paperPlane.material.transparent = true;
   const paperBaseY = paperPlane.userData._restY ?? paperPlane.position.y;
   if (paperPlane.userData._restY === undefined) paperPlane.userData._restY = paperBaseY;
 
-  await gsap.timeline()
-    .to(paperPlane.position, {
-      keyframes: [
-        { x: -0.04, duration: 0.05 },
-        { x:  0.04, duration: 0.05 },
-        { x: -0.03, duration: 0.05 },
-        { x:  0.03, duration: 0.05 },
-        { x:  0,    duration: 0.06 },
-      ],
-      ease: 'power1.inOut',
-    }, 0)
-    .to(paperPlane.position, { y: paperBaseY + 0.6, duration: 0.4, ease: 'power3.in' }, 0.2)
-    .to(paperPlane.material, { opacity: 0, duration: 0.3, ease: 'power1.in' }, 0.5)
-    .set(paperPlane, { visible: false }, '+=0')
-    .then(() => {});
+  // Draw the perforation line progressively (left → right)
+  await gsap.to({}, {
+    duration: 0.7,
+    ease: 'power1.inOut',
+    onUpdate: function () { drawTearLine(this.progress()); },
+  });
 
-  // Ensure material is transparent for fade
-  paperPlane.material.transparent = true;
+  // Brief pause once the line is fully drawn
+  await gsap.to({}, { duration: 0.15 });
+
+  // Rip sound + lift the paper away with a slight tilt
+  playRip();
+  await gsap.timeline()
+    .to(paperPlane.rotation, { z: 0.08, duration: 0.5, ease: 'power3.in' }, 0)
+    .to(paperPlane.position, { y: paperBaseY + 1.4, duration: 0.55, ease: 'power3.in' }, 0)
+    .to(paperPlane.material, { opacity: 0, duration: 0.35, ease: 'power1.in' }, 0.2)
+    .then(() => {
+      paperPlane.visible = false;
+      paperPlane.rotation.z = 0;
+      paperPlane.position.y = paperBaseY;
+      paperPlane.material.opacity = 1;
+    });
 
   // ===========================================================
   // PHASE 2 — SCROLL APPEARS: scroll model fades in centered
@@ -936,7 +934,6 @@ async function runPdfTransition() {
   if (scrollRoot.userData._restScale === undefined) {
     scrollRoot.userData._restScale = scrollRoot.scale.x;
   }
-  // Make scroll fadeable
   scrollRoot.traverse(n => {
     if (n.material) {
       n.material.transparent = true;
@@ -955,45 +952,11 @@ async function runPdfTransition() {
     }, 0)
     .then(() => {});
 
-  // ===========================================================
-  // PHASE 3 — RIBBON TIES: a torus mesh wraps around the scroll
-  // ===========================================================
-  // Build ribbon (red torus around scroll)
-  const sBox = new THREE.Box3().setFromObject(scrollRoot);
-  const sSize = sBox.getSize(new THREE.Vector3());
-  const ribbonRadius = Math.max(sSize.y, sSize.z) * 0.6;
-  const ribbon = new THREE.Mesh(
-    new THREE.TorusGeometry(ribbonRadius, 0.025, 12, 48),
-    new THREE.MeshStandardMaterial({ color: 0x9b2828, roughness: 0.5, transparent: true, opacity: 0 })
-  );
-  // Ribbon wraps around the scroll's long axis (X)
-  ribbon.rotation.y = Math.PI / 2;
-  ribbon.position.copy(scrollRoot.position);
-  scene.add(ribbon);
-
-  playRibbon();
-
-  await gsap.timeline()
-    .to(ribbon.material, { opacity: 1, duration: 0.4, ease: 'power2.out' }, 0)
-    .from(ribbon.scale, { x: 0.01, y: 0.01, z: 0.01, duration: 0.5, ease: 'back.out(1.5)' }, 0)
-    // Tighten / cinch
-    .to(ribbon.scale, { x: 0.95, y: 0.95, z: 0.95, duration: 0.25, ease: 'power2.in' }, 0.5)
-    .then(() => {});
-
-  // Brief hold — the tied scroll
-  await gsap.to({}, { duration: 0.5 });
+  // Brief hold so the scroll is appreciable
+  await gsap.to({}, { duration: 0.4 });
 
   // ===========================================================
-  // PHASE 4 — UNTIES: ribbon falls + fades
-  // ===========================================================
-  await gsap.timeline()
-    .to(ribbon.scale, { x: 1.4, y: 1.4, z: 1.4, duration: 0.5, ease: 'power2.in' }, 0)
-    .to(ribbon.position, { y: ribbon.position.y - 0.5, duration: 0.6, ease: 'power2.in' }, 0.1)
-    .to(ribbon.material, { opacity: 0, duration: 0.4, ease: 'power1.in' }, 0.3)
-    .then(() => { scene.remove(ribbon); });
-
-  // ===========================================================
-  // PHASE 5 — UNFURL: scroll spins, fades, PDF document fades in
+  // PHASE 3 — UNFURL: scroll spins, fades, PDF document fades in
   // ===========================================================
   // Scroll rotates and shrinks while a flat PDF document fades into view
   const pdfOverlay = document.createElement('div');
