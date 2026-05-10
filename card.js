@@ -117,6 +117,7 @@ function flashKey(c) {
 // Constants
 // =============================================================
 const GLB_PATH = 'assets/typewriter.glb';
+const SCROLL_GLB_PATH = 'assets/scroll.glb';
 const CLICK_PATH = 'assets/sounds/click.mp3';
 const DING_PATH = 'assets/sounds/ding.mp3';
 
@@ -355,10 +356,39 @@ function playDing() {
 // GLB loader + bone introspection
 // =============================================================
 let typewriterRoot = null;
+let scrollRoot = null;      // 3D scroll model for PDF transition
 const keyNodes = {};        // populated from KEYMAP after GLB loads
 let carriageRoot = null;    // for thunk-shake fallback
 
 const loader = new GLTFLoader();
+
+function loadScroll() {
+  return new Promise((resolve) => {
+    loader.load(
+      SCROLL_GLB_PATH,
+      (gltf) => {
+        scrollRoot = gltf.scene;
+        // Auto-fit: scroll target ~1.6 world units wide
+        const box = new THREE.Box3().setFromObject(scrollRoot);
+        const size = box.getSize(new THREE.Vector3());
+        const targetWidth = 1.6;
+        scrollRoot.scale.setScalar(targetWidth / Math.max(size.x, 0.01));
+        const center = box.getCenter(new THREE.Vector3()).multiplyScalar(scrollRoot.scale.x);
+        scrollRoot.position.set(-center.x, -box.min.y * scrollRoot.scale.x, -center.z);
+        // Hidden until PDF transition runs
+        scrollRoot.visible = false;
+        scene.add(scrollRoot);
+        console.log('Scroll GLB loaded');
+        resolve(scrollRoot);
+      },
+      undefined,
+      () => {
+        console.warn('No scroll GLB at', SCROLL_GLB_PATH, '— PDF transition will use fallback animation');
+        resolve(null);
+      }
+    );
+  });
+}
 
 function loadTypewriter() {
   return new Promise((resolve) => {
@@ -1031,8 +1061,9 @@ window.addEventListener('keydown', (e) => {
 async function boot() {
   animate();
 
-  const [_, click, ding] = await Promise.all([
+  const [_, __, click, ding] = await Promise.all([
     loadTypewriter(),
+    loadScroll(),
     loadAudio(CLICK_PATH),
     loadAudio(DING_PATH),
   ]);
