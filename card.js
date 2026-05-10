@@ -315,14 +315,15 @@ function playClick() {
   src.buffer = clickBuffer;
   src.playbackRate.value = 0.92 + Math.random() * 0.16; // 0.92 - 1.08
   const gain = audioCtx.createGain();
-  // Trim to ~80ms percussive front. The freesound clip has ambient
-  // tail that, when stacked at typing speed, sounds like background noise.
+  // Audible for ~120ms then fades out — short enough that stacked clicks
+  // at typing speed don't pile into background noise.
   const now = audioCtx.currentTime;
-  gain.gain.setValueAtTime(0.5, now);
-  gain.gain.exponentialRampToValueAtTime(0.001, now + 0.08);
+  gain.gain.setValueAtTime(0.55, now);
+  gain.gain.setValueAtTime(0.55, now + 0.09);
+  gain.gain.linearRampToValueAtTime(0, now + 0.18);
   src.connect(gain).connect(audioCtx.destination);
   src.start();
-  src.stop(now + 0.1);
+  src.stop(now + 0.2);
 }
 
 function playDing() {
