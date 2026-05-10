@@ -888,17 +888,27 @@ function startScrollCalibration() {
   const restRotY = scrollRoot.rotation.y;
   const restRotZ = scrollRoot.rotation.z;
 
+  const restPos = scrollRoot.position.clone();
+  const restScale = scrollRoot.scale.clone();
+
+  // Step state (must be declared early so handlers below can reference it)
+  let step = 1;
+  let cropBoxScreen = null;
+  let textBoxScreen = null;
+
   const ui = document.createElement('div');
   ui.id = 'scrollcal-ui';
   ui.innerHTML = `
     <div class="prompt">
-      <div id="sc-step" class="cal-line">Step 1: orient the scroll so it faces you</div>
+      <div id="sc-step" class="cal-line">Step 1: drag the scroll to rotate. Use buttons to move/zoom.</div>
       <div class="rot-row">
-        <button class="cal-btn" data-rot="x-">⬆ tilt back</button>
-        <button class="cal-btn" data-rot="x+">⬇ tilt forward</button>
-        <button class="cal-btn" data-rot="y-">↶ rotate left</button>
-        <button class="cal-btn" data-rot="y+">↷ rotate right</button>
-        <button class="cal-btn" data-rot="reset">reset</button>
+        <button class="cal-btn" data-act="up">⬆</button>
+        <button class="cal-btn" data-act="down">⬇</button>
+        <button class="cal-btn" data-act="left">⬅</button>
+        <button class="cal-btn" data-act="right">➡</button>
+        <button class="cal-btn" data-act="zin">＋</button>
+        <button class="cal-btn" data-act="zout">－</button>
+        <button class="cal-btn" data-act="reset">reset</button>
       </div>
       <div class="cal-actions">
         <button id="sc-next1" class="cal-btn primary">Next: draw OPEN scroll box</button>
@@ -907,20 +917,43 @@ function startScrollCalibration() {
   `;
   document.body.appendChild(ui);
 
-  // Orientation buttons (15° steps)
-  const STEP = Math.PI / 12;
-  ui.querySelectorAll('[data-rot]').forEach(b => {
+  const MOVE = 0.15;
+  const ZOOM = 1.15;
+  ui.querySelectorAll('[data-act]').forEach(b => {
     b.addEventListener('click', () => {
-      const k = b.dataset.rot;
-      if (k === 'x-') scrollRoot.rotation.x -= STEP;
-      else if (k === 'x+') scrollRoot.rotation.x += STEP;
-      else if (k === 'y-') scrollRoot.rotation.y -= STEP;
-      else if (k === 'y+') scrollRoot.rotation.y += STEP;
+      const k = b.dataset.act;
+      if (k === 'up') scrollRoot.position.y += MOVE;
+      else if (k === 'down') scrollRoot.position.y -= MOVE;
+      else if (k === 'left') scrollRoot.position.x -= MOVE;
+      else if (k === 'right') scrollRoot.position.x += MOVE;
+      else if (k === 'zin') scrollRoot.scale.multiplyScalar(ZOOM);
+      else if (k === 'zout') scrollRoot.scale.multiplyScalar(1 / ZOOM);
       else if (k === 'reset') {
         scrollRoot.rotation.set(restRotX, restRotY, restRotZ);
+        scrollRoot.position.copy(restPos);
+        scrollRoot.scale.copy(restScale);
       }
     });
   });
+
+  // Drag to rotate (only during step 1)
+  let rotDrag = null;
+  function rotDown(e) {
+    if (step !== 1) return;
+    if (e.target.closest('#scrollcal-ui')) return;
+    rotDrag = { x: e.clientX, y: e.clientY, rx: scrollRoot.rotation.x, ry: scrollRoot.rotation.y };
+  }
+  function rotMove(e) {
+    if (!rotDrag) return;
+    const dx = (e.clientX - rotDrag.x) / 200;
+    const dy = (e.clientY - rotDrag.y) / 200;
+    scrollRoot.rotation.y = rotDrag.ry + dx;
+    scrollRoot.rotation.x = rotDrag.rx + dy;
+  }
+  function rotUp() { rotDrag = null; }
+  document.addEventListener('mousedown', rotDown);
+  document.addEventListener('mousemove', rotMove);
+  document.addEventListener('mouseup', rotUp);
 
   // Drag-to-draw box overlay
   const dragBox = document.createElement('div');
@@ -950,10 +983,7 @@ function startScrollCalibration() {
     dragBox.style.height = h + 'px';
   }
 
-  // Step state
-  let step = 1; // 1=orient, 2=draw crop box, 3=draw text box, 4=save
-  let cropBoxScreen = null; // {x, y, w, h}
-  let textBoxScreen = null;
+  // (step/cropBoxScreen/textBoxScreen declared earlier)
 
   function screenToWorldOnScroll(sx, sy) {
     const rect = renderer.domElement.getBoundingClientRect();
