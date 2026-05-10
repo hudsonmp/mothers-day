@@ -822,6 +822,8 @@ body.printing { overflow: hidden; }
 }
 #scrollcal-ui .cal-btn:hover { background: #3a2a1f; }
 #scrollcal-ui .cal-btn.primary { background: #f4ead4; color: #1a1410; }
+#scrollcal-ui .rot-row { display: flex; gap: 6px; flex-wrap: wrap; justify-content: center; }
+#scrollcal-ui .rot-row .cal-btn { padding: 6px 12px; font-size: 0.8rem; }
 
 #calibrate-ui textarea {
   width: 100%;

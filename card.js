@@ -453,6 +453,11 @@ function loadScroll() {
         if (savedCrop && savedCrop.length === 2) {
           applyScrollCrop(savedCrop[0], savedCrop[1]);
         }
+        // Apply saved rotation if present (from /scroll-cal)
+        try {
+          const r = JSON.parse(localStorage.getItem('scrollRotation') || 'null');
+          if (r) scrollRoot.rotation.set(r.x, r.y, r.z);
+        } catch {}
 
         // Expose for debugging
         window.scrollDebug = { root: scrollRoot, open: scrollOpenMesh, closed: scrollClosedMeshes, meshes };
@@ -862,96 +867,196 @@ function startCalibration(onlyKey = null) {
 }
 
 function startScrollCalibration() {
-  if (!scrollRoot) {
-    alert('Scroll model not loaded');
-    return;
-  }
-  // Make scroll fully visible at its rest position
+  if (!scrollRoot) { alert('Scroll model not loaded'); return; }
+
+  // Hide typewriter for this page
+  if (typewriterRoot) typewriterRoot.visible = false;
+
+  // Show scroll big & centered, no clipping
   scrollRoot.visible = true;
   scrollRoot.traverse(n => {
     if (n.material) {
       n.material.transparent = false;
       n.material.opacity = 1;
-      // Clear any existing clipping
       n.material.clippingPlanes = null;
     }
   });
   renderer.localClippingEnabled = false;
 
+  // Reset to default orientation; user can rotate via buttons
+  const restRotX = scrollRoot.rotation.x;
+  const restRotY = scrollRoot.rotation.y;
+  const restRotZ = scrollRoot.rotation.z;
+
   const ui = document.createElement('div');
   ui.id = 'scrollcal-ui';
   ui.innerHTML = `
     <div class="prompt">
-      <div id="sc-step" class="cal-line">Click <b>top-left</b> corner of the OPEN scroll</div>
-      <div class="cal-progress"><span id="sc-done">0</span> / 2</div>
-    </div>
-    <div class="cal-actions">
-      <button id="sc-reset" class="cal-btn">Reset</button>
-      <button id="sc-clear" class="cal-btn">Clear saved crop</button>
+      <div id="sc-step" class="cal-line">Step 1: orient the scroll so it faces you</div>
+      <div class="rot-row">
+        <button class="cal-btn" data-rot="x-">⬆ tilt back</button>
+        <button class="cal-btn" data-rot="x+">⬇ tilt forward</button>
+        <button class="cal-btn" data-rot="y-">↶ rotate left</button>
+        <button class="cal-btn" data-rot="y+">↷ rotate right</button>
+        <button class="cal-btn" data-rot="reset">reset</button>
+      </div>
+      <div class="cal-actions">
+        <button id="sc-next1" class="cal-btn primary">Next: draw OPEN scroll box</button>
+      </div>
     </div>
   `;
   document.body.appendChild(ui);
 
-  let points = [];
-  const STEPS = ['top-left', 'bottom-right'];
-  const raycaster = new THREE.Raycaster();
+  // Orientation buttons (15° steps)
+  const STEP = Math.PI / 12;
+  ui.querySelectorAll('[data-rot]').forEach(b => {
+    b.addEventListener('click', () => {
+      const k = b.dataset.rot;
+      if (k === 'x-') scrollRoot.rotation.x -= STEP;
+      else if (k === 'x+') scrollRoot.rotation.x += STEP;
+      else if (k === 'y-') scrollRoot.rotation.y -= STEP;
+      else if (k === 'y+') scrollRoot.rotation.y += STEP;
+      else if (k === 'reset') {
+        scrollRoot.rotation.set(restRotX, restRotY, restRotZ);
+      }
+    });
+  });
 
-  function update() {
-    document.getElementById('sc-done').textContent = points.length;
-    if (points.length === 2) {
-      // Apply preview clipping
-      applyScrollCrop(points[0], points[1]);
-      document.getElementById('sc-step').innerHTML =
-        `Crop applied. <button id="sc-save" class="cal-btn primary">Save & exit</button>`;
-      document.getElementById('sc-save').addEventListener('click', () => {
-        localStorage.setItem('scrollCrop', JSON.stringify(points));
-        location.href = '/';
-      });
-    } else {
-      document.getElementById('sc-step').innerHTML =
-        `Click <b>${STEPS[points.length]}</b> corner of the OPEN scroll`;
-    }
+  // Drag-to-draw box overlay
+  const dragBox = document.createElement('div');
+  dragBox.id = 'sc-dragbox';
+  dragBox.style.cssText = 'position:fixed;border:2px dashed #f4d76a;background:rgba(244,215,106,0.12);z-index:48;pointer-events:none;display:none;';
+  document.body.appendChild(dragBox);
+
+  let dragStart = null;
+  function onDown(e) {
+    if (e.target.closest('#scrollcal-ui')) return;
+    dragStart = { x: e.clientX, y: e.clientY };
+    dragBox.style.display = 'block';
+    dragBox.style.left = e.clientX + 'px';
+    dragBox.style.top = e.clientY + 'px';
+    dragBox.style.width = '0px';
+    dragBox.style.height = '0px';
+  }
+  function onMove(e) {
+    if (!dragStart) return;
+    const x = Math.min(e.clientX, dragStart.x);
+    const y = Math.min(e.clientY, dragStart.y);
+    const w = Math.abs(e.clientX - dragStart.x);
+    const h = Math.abs(e.clientY - dragStart.y);
+    dragBox.style.left = x + 'px';
+    dragBox.style.top = y + 'px';
+    dragBox.style.width = w + 'px';
+    dragBox.style.height = h + 'px';
   }
 
-  function captureClick(e) {
-    if (points.length >= 2) return;
-    if (e.target.closest('#scrollcal-ui')) return;
+  // Step state
+  let step = 1; // 1=orient, 2=draw crop box, 3=draw text box, 4=save
+  let cropBoxScreen = null; // {x, y, w, h}
+  let textBoxScreen = null;
 
+  function screenToWorldOnScroll(sx, sy) {
     const rect = renderer.domElement.getBoundingClientRect();
-    const ndcX = ((e.clientX - rect.left) / rect.width) * 2 - 1;
-    const ndcY = -(((e.clientY - rect.top) / rect.height) * 2 - 1);
+    const ndcX = ((sx - rect.left) / rect.width) * 2 - 1;
+    const ndcY = -(((sy - rect.top) / rect.height) * 2 - 1);
+    const raycaster = new THREE.Raycaster();
     raycaster.setFromCamera(new THREE.Vector2(ndcX, ndcY), camera);
     const hits = raycaster.intersectObject(scrollRoot, true);
-    let pt;
-    if (hits.length > 0) {
-      pt = hits[0].point.clone();
-    } else {
-      // Fallback: project at scroll center depth
-      const center = new THREE.Vector3();
-      new THREE.Box3().setFromObject(scrollRoot).getCenter(center);
-      pt = new THREE.Vector3(ndcX, ndcY, 0).unproject(camera);
-      pt.z = center.z;
-    }
-    points.push([+pt.x.toFixed(3), +pt.y.toFixed(3), +pt.z.toFixed(3)]);
-    update();
+    if (hits.length > 0) return hits[0].point.clone();
+    // Fallback at scroll center depth
+    const c = new THREE.Vector3();
+    new THREE.Box3().setFromObject(scrollRoot).getCenter(c);
+    const pt = new THREE.Vector3(ndcX, ndcY, 0).unproject(camera);
+    pt.z = c.z;
+    return pt;
   }
 
-  document.addEventListener('click', captureClick);
+  function onUp(e) {
+    if (!dragStart) return;
+    const x = Math.min(e.clientX, dragStart.x);
+    const y = Math.min(e.clientY, dragStart.y);
+    const w = Math.abs(e.clientX - dragStart.x);
+    const h = Math.abs(e.clientY - dragStart.y);
+    dragStart = null;
+    if (w < 10 || h < 10) { dragBox.style.display = 'none'; return; }
+    const screenBox = { x, y, w, h };
 
-  document.getElementById('sc-reset').addEventListener('click', () => {
-    points = [];
-    scrollRoot.traverse(n => {
-      if (n.material) n.material.clippingPlanes = null;
+    if (step === 2) {
+      cropBoxScreen = screenBox;
+      // Apply crop (raycast 4 corners)
+      const tl = screenToWorldOnScroll(x, y);
+      const br = screenToWorldOnScroll(x + w, y + h);
+      applyScrollCrop([tl.x, tl.y, tl.z], [br.x, br.y, br.z]);
+      dragBox.style.display = 'none';
+      step = 3;
+      ui.querySelector('.prompt').innerHTML = `
+        <div class="cal-line">Step 3: drag a box around the FLAT OPEN AREA where text goes</div>
+        <div class="cal-actions">
+          <button id="sc-skip-text" class="cal-btn">Skip (use whole crop)</button>
+        </div>
+      `;
+      ui.querySelector('#sc-skip-text').addEventListener('click', () => {
+        textBoxScreen = cropBoxScreen;
+        finish();
+      });
+    } else if (step === 3) {
+      textBoxScreen = screenBox;
+      dragBox.style.display = 'none';
+      finish();
+    }
+  }
+
+  function finish() {
+    step = 4;
+    // Compute text region as screen-space % of viewport
+    const vw = window.innerWidth, vh = window.innerHeight;
+    const textRegionPct = {
+      left: textBoxScreen.x / vw,
+      top: textBoxScreen.y / vh,
+      width: textBoxScreen.w / vw,
+      height: textBoxScreen.h / vh,
+    };
+    ui.querySelector('.prompt').innerHTML = `
+      <div class="cal-line">Save crop + text region + orientation?</div>
+      <div class="cal-actions">
+        <button id="sc-save" class="cal-btn primary">Save & exit</button>
+        <button id="sc-restart" class="cal-btn">Restart</button>
+        <button id="sc-clear" class="cal-btn">Clear saved</button>
+      </div>
+    `;
+    ui.querySelector('#sc-save').addEventListener('click', () => {
+      // Save: crop world bounds (already applied), text region, scroll rotation
+      const tl = screenToWorldOnScroll(cropBoxScreen.x, cropBoxScreen.y);
+      const br = screenToWorldOnScroll(cropBoxScreen.x + cropBoxScreen.w, cropBoxScreen.y + cropBoxScreen.h);
+      localStorage.setItem('scrollCrop', JSON.stringify([
+        [tl.x, tl.y, tl.z], [br.x, br.y, br.z],
+      ]));
+      localStorage.setItem('scrollTextRegion', JSON.stringify(textRegionPct));
+      localStorage.setItem('scrollRotation', JSON.stringify({
+        x: scrollRoot.rotation.x, y: scrollRoot.rotation.y, z: scrollRoot.rotation.z,
+      }));
+      location.href = '/';
     });
-    renderer.localClippingEnabled = false;
-    update();
-  });
-  document.getElementById('sc-clear').addEventListener('click', () => {
-    localStorage.removeItem('scrollCrop');
-    location.href = '/';
-  });
+    ui.querySelector('#sc-restart').addEventListener('click', () => location.reload());
+    ui.querySelector('#sc-clear').addEventListener('click', () => {
+      localStorage.removeItem('scrollCrop');
+      localStorage.removeItem('scrollTextRegion');
+      localStorage.removeItem('scrollRotation');
+      location.href = '/';
+    });
+  }
 
-  update();
+  document.addEventListener('mousedown', onDown);
+  document.addEventListener('mousemove', onMove);
+  document.addEventListener('mouseup', onUp);
+
+  // Step 1 → Step 2 transition
+  document.getElementById('sc-next1').addEventListener('click', () => {
+    step = 2;
+    ui.querySelector('.prompt').innerHTML = `
+      <div class="cal-line">Step 2: drag a box around the WHOLE open scroll (crops out the closed scrolls)</div>
+    `;
+  });
 }
 
 function formatCalibrateOutput(captured) {
@@ -1131,6 +1236,21 @@ async function runPdfTransition() {
   const pdfActions = pdfOverlay.querySelector('.pdf-actions');
 
   buildPdfContent(pdfContent);
+
+  // If a text region was calibrated via /scroll-cal, position the
+  // text-region element to match. Otherwise it uses CSS defaults.
+  try {
+    const r = JSON.parse(localStorage.getItem('scrollTextRegion') || 'null');
+    if (r) {
+      textRegion.style.position = 'absolute';
+      textRegion.style.left = (r.left * 100) + 'vw';
+      textRegion.style.top = (r.top * 100) + 'vh';
+      textRegion.style.width = (r.width * 100) + 'vw';
+      textRegion.style.height = (r.height * 100) + 'vh';
+      textRegion.style.maxWidth = 'none';
+      textRegion.style.maxHeight = 'none';
+    }
+  } catch {}
 
   // Initial state: overlay invisible, text hidden behind clip + full blur
   gsap.set(pdfOverlay, { opacity: 0 });
