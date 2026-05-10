@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>For Mom</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Special+Elite&family=Caveat:wght@400;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+      "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+    }
+  }
+  </script>
+
+  <script src="https://unpkg.com/gsap@3.12.5/dist/gsap.min.js"></script>
+</head>
+<body>
+  <div id="loading">
+    <div class="loading-text">developing the film…</div>
+  </div>
+
+  <div id="start-overlay" class="hidden">
+    <button id="start-button">Open the letter</button>
+    <div class="start-hint">(audio plays — turn it up)</div>
+  </div>
+
+  <main id="stage">
+    <canvas id="scene"></canvas>
+
+    <div id="overlay-layer">
+      <div id="polaroids"></div>
+      <div id="doodles"></div>
+    </div>
+  </main>
+
+  <footer id="credits">
+    Typewriter model by <a href="https://sketchfab.com/3d-models/typewriter-rigged-and-ready-for-animation-3e206596358446069e3c3b9bf04830ef" target="_blank" rel="noopener">Inlet via Sketchfab</a>
+    · sounds via <a href="https://freesound.org" target="_blank" rel="noopener">Freesound</a>
+    · made with love
+  </footer>
+
+  <script type="module" src="card.js"></script>
+</body>
+</html>

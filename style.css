@@ -1,0 +1,229 @@
+/* ===================================================================
+   Layout: full-bleed scene with absolutely positioned overlays.
+   The 3D canvas fills the viewport; polaroids/doodles float on top.
+   =================================================================== */
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+html, body {
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: #1a1410;
+  font-family: 'Special Elite', 'Courier New', monospace;
+  color: #f4ead4;
+}
+
+#stage {
+  position: relative;
+  width: 100vw;
+  height: 100vh;
+}
+
+#scene {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+
+/* Overlay layer holds polaroids + doodles in screen-space.
+   pointer-events: none so it never blocks the 3D scene. */
+#overlay-layer {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+#polaroids, #doodles {
+  position: absolute;
+  inset: 0;
+}
+
+/* ===================================================================
+   Polaroids: develop animation = blur + saturation easing in.
+   Random tilt is set inline via --tilt CSS variable.
+   =================================================================== */
+
+.polaroid {
+  position: absolute;
+  width: 220px;
+  padding: 12px 12px 36px;
+  background: #fefcf3;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45), 0 2px 6px rgba(0, 0, 0, 0.3);
+  transform: translate(-50%, -50%) rotate(var(--tilt, 0deg)) scale(0.7);
+  opacity: 0;
+  transition: opacity 0.4s ease, transform 0.6s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+.polaroid img {
+  display: block;
+  width: 100%;
+  aspect-ratio: 1 / 1;
+  object-fit: cover;
+  filter: blur(8px) saturate(0.2) brightness(1.2);
+  transition: filter 1.4s ease-out;
+}
+
+.polaroid .caption {
+  margin-top: 10px;
+  font-family: 'Caveat', cursive;
+  font-size: 1.1rem;
+  color: #4a3a2a;
+  text-align: center;
+  line-height: 1.1;
+}
+
+.polaroid.visible {
+  opacity: 1;
+  transform: translate(-50%, -50%) rotate(var(--tilt, 0deg)) scale(1);
+}
+
+.polaroid.visible img {
+  filter: blur(0) saturate(1) brightness(1);
+}
+
+/* ===================================================================
+   Doodles: SVG paths with stroke-dashoffset animating to 0.
+   The .draw class triggers the self-drawing effect.
+   =================================================================== */
+
+.doodle {
+  position: absolute;
+  width: 120px;
+  height: 120px;
+  transform: translate(-50%, -50%) rotate(var(--rot, 0deg));
+  opacity: 0.85;
+}
+
+.doodle svg {
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+}
+
+.doodle path,
+.doodle line,
+.doodle circle,
+.doodle polyline {
+  fill: none;
+  stroke: #2a1f15;
+  stroke-width: 2.5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-dasharray: 1000;
+  stroke-dashoffset: 1000;
+  transition: stroke-dashoffset 1.8s ease-out;
+}
+
+.doodle.draw path,
+.doodle.draw line,
+.doodle.draw circle,
+.doodle.draw polyline {
+  stroke-dashoffset: 0;
+}
+
+/* ===================================================================
+   Loading + start overlays.
+   =================================================================== */
+
+#loading {
+  position: fixed;
+  inset: 0;
+  background: #1a1410;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 10;
+  transition: opacity 0.6s ease;
+}
+
+#loading.gone {
+  opacity: 0;
+  pointer-events: none;
+}
+
+.loading-text {
+  font-family: 'Special Elite', monospace;
+  color: #f4ead4;
+  font-size: 1.2rem;
+  letter-spacing: 0.1em;
+  animation: pulse 1.4s ease-in-out infinite;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 0.4; }
+  50% { opacity: 1; }
+}
+
+#start-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(26, 20, 16, 0.85);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  z-index: 9;
+  transition: opacity 0.6s ease;
+}
+
+#start-overlay.hidden {
+  opacity: 0;
+  pointer-events: none;
+}
+
+#start-button {
+  font-family: 'Special Elite', monospace;
+  font-size: 1.5rem;
+  padding: 18px 36px;
+  background: #f4ead4;
+  color: #1a1410;
+  border: none;
+  cursor: pointer;
+  letter-spacing: 0.05em;
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+  box-shadow: 0 6px 0 #8b7355, 0 12px 24px rgba(0, 0, 0, 0.4);
+}
+
+#start-button:hover {
+  transform: translateY(2px);
+  box-shadow: 0 4px 0 #8b7355, 0 8px 16px rgba(0, 0, 0, 0.4);
+}
+
+#start-button:active {
+  transform: translateY(6px);
+  box-shadow: 0 0 0 #8b7355, 0 2px 4px rgba(0, 0, 0, 0.4);
+}
+
+.start-hint {
+  font-family: 'Caveat', cursive;
+  font-size: 1.1rem;
+  color: #f4ead4;
+  opacity: 0.7;
+}
+
+/* ===================================================================
+   Credits footer.
+   =================================================================== */
+
+#credits {
+  position: fixed;
+  bottom: 8px;
+  left: 50%;
+  transform: translateX(-50%);
+  font-family: 'Caveat', cursive;
+  font-size: 0.85rem;
+  color: #8b7355;
+  opacity: 0.6;
+  text-align: center;
+  pointer-events: auto;
+  z-index: 5;
+}
+
+#credits a {
+  color: inherit;
+  text-decoration: underline;
+}
