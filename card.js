@@ -574,11 +574,12 @@ async function typeParagraph(paragraph) {
     textBuffer += c;
     repaintPaper();
 
-    if (c !== '\n' && c !== ' ') {
+    if (c === '\n') {
+      flashKey('newline');
+      playDing();
+    } else if (c !== ' ') {
       pressKey(c);
       playClick();
-    } else if (c === '\n') {
-      playDing();
     }
 
     await sleep(delayForChar(c, fastSpans[i]));
@@ -662,24 +663,32 @@ async function showDoodle(d) {
 // =============================================================
 const isTestMode = new URLSearchParams(location.search).has('test')
   || location.pathname.startsWith('/test');
-const isCalibrate = new URLSearchParams(location.search).has('calibrate')
+const _calibrateParam = new URLSearchParams(location.search).get('calibrate');
+const isCalibrate = _calibrateParam !== null
   || location.pathname.startsWith('/calibrate');
+// Optional: ?calibrate=newline calibrates only that one key (merges with existing)
+const calibrateOnlyKey = (_calibrateParam && _calibrateParam !== '1' && _calibrateParam !== '')
+  ? _calibrateParam : null;
 
 // Order in which calibration prompts each key
 const CALIBRATE_KEYS = [
   'q','w','e','r','t','y','u','i','o','p',
   'a','s','d','f','g','h','j','k','l',
   'z','x','c','v','b','n','m',
-  ',','.',' ',
+  ',','.',' ','newline',
 ];
 
-function startCalibration() {
+function startCalibration(onlyKey = null) {
+  // If onlyKey is set, calibrate just that one key and merge with existing
+  const keysToCalibrate = onlyKey ? [onlyKey] : CALIBRATE_KEYS;
+  const merging = !!onlyKey;
+
   const ui = document.createElement('div');
   ui.id = 'calibrate-ui';
   ui.innerHTML = `
     <div class="cal-prompt">
-      <div class="cal-line">Click on the <span id="cal-key">Q</span> key</div>
-      <div class="cal-progress"><span id="cal-done">0</span> / ${CALIBRATE_KEYS.length}</div>
+      <div class="cal-line">Click on the <span id="cal-key">Q</span> ${merging ? 'position' : 'key'}</div>
+      <div class="cal-progress"><span id="cal-done">0</span> / ${keysToCalibrate.length}</div>
     </div>
     <button id="cal-skip" class="cal-btn">Skip this key</button>
     <button id="cal-undo" class="cal-btn">Undo last</button>
@@ -691,8 +700,14 @@ function startCalibration() {
   const captured = {};
   const order = [];
 
+  function keyLabel(k) {
+    if (k === ' ') return '␣ (spacebar)';
+    if (k === 'newline') return '⏎ (Return / carriage return lever)';
+    return k.toUpperCase();
+  }
+
   function update() {
-    if (idx >= CALIBRATE_KEYS.length) {
+    if (idx >= keysToCalibrate.length) {
       const code = formatCalibrateOutput(captured);
       const out = document.getElementById('cal-output');
       out.innerHTML = `
@@ -708,27 +723,31 @@ function startCalibration() {
       document.getElementById('cal-skip').style.display = 'none';
       document.getElementById('cal-undo').style.display = 'none';
       document.getElementById('cal-save').addEventListener('click', () => {
-        localStorage.setItem('keyCalibration', JSON.stringify(captured));
+        // Merge with existing if calibrating just one key
+        let toSave = captured;
+        if (merging) {
+          const existing = JSON.parse(localStorage.getItem('keyCalibration') || '{}');
+          toSave = { ...existing, ...captured };
+        }
+        localStorage.setItem('keyCalibration', JSON.stringify(toSave));
         location.href = '/';
       });
       document.getElementById('cal-restart').addEventListener('click', () => location.reload());
       return;
     }
-    document.getElementById('cal-key').textContent =
-      CALIBRATE_KEYS[idx] === ' ' ? '␣ (spacebar)' : CALIBRATE_KEYS[idx].toUpperCase();
+    document.getElementById('cal-key').textContent = keyLabel(keysToCalibrate[idx]);
     document.getElementById('cal-done').textContent = idx;
   }
   update();
 
   function captureClick(e) {
-    if (idx >= CALIBRATE_KEYS.length) return;
-    // Ignore clicks on the UI itself
+    if (idx >= keysToCalibrate.length) return;
     if (e.target.closest('#calibrate-ui')) return;
     const b = getTypewriterScreenBounds();
     if (!b) return;
     const pctX = (e.clientX - b.left) / b.width;
     const pctY = (e.clientY - b.top) / b.height;
-    const key = CALIBRATE_KEYS[idx];
+    const key = keysToCalibrate[idx];
     captured[key] = [+pctX.toFixed(3), +pctY.toFixed(3)];
     order.push(key);
     // Show a pulse where they clicked (so they see what was captured)
@@ -747,7 +766,7 @@ function startCalibration() {
   document.addEventListener('click', captureClick);
 
   document.getElementById('cal-skip').addEventListener('click', () => {
-    if (idx >= CALIBRATE_KEYS.length) return;
+    if (idx >= keysToCalibrate.length) return;
     idx++;
     update();
   });
@@ -764,7 +783,10 @@ function formatCalibrateOutput(captured) {
   const lines = [];
   for (const key of CALIBRATE_KEYS) {
     if (!captured[key]) continue;
-    const k = key === ' ' ? "' '" : `'${key}'`;
+    let k;
+    if (key === ' ') k = "' '";
+    else if (key === 'newline') k = "'newline'";
+    else k = `'${key}'`;
     lines.push(`  ${k}: [${captured[key][0]}, ${captured[key][1]}],`);
   }
   return 'const KEY_TYPEWRITER_PCT = {\n' + lines.join('\n') + '\n};';
@@ -1046,11 +1068,15 @@ window.addEventListener('keydown', (e) => {
     textBuffer += c;
     scrollOffset = 0;
     repaintPaper();
-    if (c !== '\n' && c !== ' ') {
+    if (c === '\n') {
+      flashKey('newline');
+      playDing();
+    } else if (c !== ' ') {
       flashKey(c);
       playClick();
-    } else if (c === '\n') {
-      playDing();
+    } else {
+      flashKey(' ');
+      playClick();
     }
   }
 });
@@ -1079,12 +1105,14 @@ async function boot() {
     overlay.classList.remove('hidden');
     document.getElementById('start-button').textContent = 'Calibrate (fullscreen)';
     document.querySelector('.start-hint').textContent = '(click each key as prompted)';
+    if (calibrateOnlyKey) {
+      document.getElementById('start-button').textContent = `Calibrate ${calibrateOnlyKey} (fullscreen)`;
+    }
     document.getElementById('start-button').addEventListener('click', async () => {
       try { await document.documentElement.requestFullscreen?.(); } catch {}
-      // Wait one frame for the resize to settle so bounds are correct
       requestAnimationFrame(() => requestAnimationFrame(() => {
         overlay.classList.add('hidden');
-        startCalibration();
+        startCalibration(calibrateOnlyKey);
       }));
     }, { once: true });
     return;
