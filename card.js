@@ -28,35 +28,44 @@ const scenes = loadScenes();
 const KEYMAP = {};
 
 // =============================================================
-// KEY_POSITIONS — viewport-percentage coords of each letter key on
-// the rendered Underwood. Used by flashKey() to render a brief pulse
-// at the right key position when that char types.
+// KEY_WORLD — approximate 3D positions of each letter key on the
+// post-auto-fit typewriter (typewriter occupies x = -1..1 after scale).
+// Projected to screen each time, so dots stay aligned regardless of
+// viewport size, aspect ratio, or fullscreen state.
 // =============================================================
-const KEY_POSITIONS = {
-  'q': {x: 0.295, y: 0.66}, 'w': {x: 0.345, y: 0.66}, 'e': {x: 0.395, y: 0.66},
-  'r': {x: 0.445, y: 0.66}, 't': {x: 0.495, y: 0.66}, 'y': {x: 0.545, y: 0.66},
-  'u': {x: 0.595, y: 0.66}, 'i': {x: 0.645, y: 0.66}, 'o': {x: 0.695, y: 0.66},
-  'p': {x: 0.745, y: 0.66},
-  'a': {x: 0.305, y: 0.74}, 's': {x: 0.355, y: 0.74}, 'd': {x: 0.405, y: 0.74},
-  'f': {x: 0.455, y: 0.74}, 'g': {x: 0.505, y: 0.74}, 'h': {x: 0.555, y: 0.74},
-  'j': {x: 0.605, y: 0.74}, 'k': {x: 0.655, y: 0.74}, 'l': {x: 0.705, y: 0.74},
-  'z': {x: 0.330, y: 0.82}, 'x': {x: 0.380, y: 0.82}, 'c': {x: 0.430, y: 0.82},
-  'v': {x: 0.480, y: 0.82}, 'b': {x: 0.530, y: 0.82}, 'n': {x: 0.580, y: 0.82},
-  'm': {x: 0.630, y: 0.82},
-  ',': {x: 0.680, y: 0.82}, '.': {x: 0.730, y: 0.82},
-  ' ': {x: 0.500, y: 0.88},
+function row(chars, y, z, xStart, xStep) {
+  const out = {};
+  chars.forEach((c, i) => { out[c] = [xStart + i * xStep, y, z]; });
+  return out;
+}
+const KEY_WORLD = {
+  ...row(['q','w','e','r','t','y','u','i','o','p'], 0.34, 0.45, -0.65, 0.143),
+  ...row(['a','s','d','f','g','h','j','k','l'],     0.22, 0.58, -0.58, 0.143),
+  ...row(['z','x','c','v','b','n','m'],             0.10, 0.71, -0.43, 0.143),
+  ',': [0.50, 0.10, 0.71],
+  '.': [0.65, 0.10, 0.71],
+  ' ': [0.0, -0.02, 0.78],
 };
+
+const _projectVec = new (class { constructor(){} })(); // placeholder, replaced below
+// Use THREE.Vector3 lazily after import
+let _kpVec = null;
 
 function flashKey(c) {
   const lower = String(c).toLowerCase();
-  const pos = KEY_POSITIONS[lower];
-  if (!pos) return;
+  const arr = KEY_WORLD[lower];
+  if (!arr) return;
+  if (!_kpVec) _kpVec = new THREE.Vector3();
+  _kpVec.set(arr[0], arr[1], arr[2]).project(camera);
+  const x = (_kpVec.x + 1) / 2 * window.innerWidth;
+  const y = (-_kpVec.y + 1) / 2 * window.innerHeight;
+
   const layer = document.getElementById('key-overlay');
   if (!layer) return;
   const dot = document.createElement('div');
   dot.className = 'key-pulse';
-  dot.style.left = `${pos.x * 100}vw`;
-  dot.style.top = `${pos.y * 100}vh`;
+  dot.style.left = `${x}px`;
+  dot.style.top = `${y}px`;
   layer.appendChild(dot);
   setTimeout(() => dot.remove(), 380);
 }
@@ -68,11 +77,11 @@ const GLB_PATH = 'assets/typewriter.glb';
 const CLICK_PATH = 'assets/sounds/click.mp3';
 const DING_PATH = 'assets/sounds/ding.mp3';
 
-const PAPER_WIDTH_PX = 1024;
 const PAPER_HEIGHT_PX = 1448;
-const FONT_SIZE = 36;
-const LINE_HEIGHT = 48;
-const MARGIN_X = 90;
+const PAPER_WIDTH_PX = 808;  // matches narrowed plane (1.45 / 2.6 aspect)
+const FONT_SIZE = 32;
+const LINE_HEIGHT = 44;
+const MARGIN_X = 70;
 const MARGIN_Y = 110;
 const MAX_TEXT_WIDTH = PAPER_WIDTH_PX - MARGIN_X * 2;
 
@@ -156,10 +165,10 @@ const paperMaterial = new THREE.MeshStandardMaterial({
 });
 
 // Paper extends above and below typewriter so the bottom looks like
-// it has been fed through. Aspect ratio matches the canvas exactly so
-// text doesn't get horizontally squished.
+// it has been fed through the platen. Width is narrower than the
+// typewriter base so the paper appears to fit through the platen.
 const paperWorldHeight = 2.6;
-const paperWorldWidth = paperWorldHeight * (PAPER_WIDTH_PX / PAPER_HEIGHT_PX);
+const paperWorldWidth = 1.45;
 const paperPlane = new THREE.Mesh(
   new THREE.PlaneGeometry(paperWorldWidth, paperWorldHeight),
   paperMaterial
@@ -213,13 +222,24 @@ function repaintPaper() {
   const lines = wordWrap(textBuffer, MAX_TEXT_WIDTH);
   // Render so the LAST line sits at TYPE_LINE_Y. Earlier lines stack
   // upward (smaller canvas Y → higher in viewport). Anything above
-  // the top margin is clipped — that's the "scroll off" effect.
+  // the top margin gets occluded by the fold gradient (scroll off effect).
   for (let i = 0; i < lines.length; i++) {
     const y = TYPE_LINE_Y - (lines.length - 1 - i) * LINE_HEIGHT;
-    if (y < MARGIN_Y - LINE_HEIGHT) continue;       // clipped (scrolled off top)
-    if (y > TYPE_LINE_Y) break;                      // shouldn't happen
+    if (y < -LINE_HEIGHT) continue;                  // way off the top
+    if (y > TYPE_LINE_Y) break;
     pctx.fillText(lines[i], MARGIN_X, y);
   }
+
+  // Top-fold overlay: text fades into shadow at the top of the paper,
+  // simulating the paper curling/rolling at the top of the visible area.
+  const foldHeight = MARGIN_Y * 2.2;
+  const grad = pctx.createLinearGradient(0, 0, 0, foldHeight);
+  grad.addColorStop(0, 'rgba(40, 28, 18, 0.96)');
+  grad.addColorStop(0.45, 'rgba(90, 65, 42, 0.55)');
+  grad.addColorStop(0.85, 'rgba(180, 150, 110, 0.12)');
+  grad.addColorStop(1, 'rgba(244, 234, 212, 0)');
+  pctx.fillStyle = grad;
+  pctx.fillRect(0, 0, PAPER_WIDTH_PX, foldHeight);
 
   paperTexture.needsUpdate = true;
 
@@ -427,14 +447,14 @@ function pressKey(char) {
 // Typing engine — variable pacing
 // =============================================================
 function delayForChar(c, isShortWord) {
-  // Reading-pace, not typing-pace: ~25ms/char ≈ 240 wpm comfortable read.
-  if (c === '\n') return 280;
-  if (c === '.') return 180;
-  if (c === '?' || c === '!') return 160;
-  if (c === ',' || c === ';' || c === ':') return 90;
-  if (c === ' ') return 30;
-  const base = 18 + Math.random() * 20; // 18-38ms
-  return Math.round(isShortWord ? base * 0.6 : base);
+  // Reading-comfortable pace ~ 180-200 wpm.
+  if (c === '\n') return 360;
+  if (c === '.') return 240;
+  if (c === '?' || c === '!') return 220;
+  if (c === ',' || c === ';' || c === ':') return 130;
+  if (c === ' ') return 50;
+  const base = 35 + Math.random() * 25; // 35-60ms
+  return Math.round(isShortWord ? base * 0.7 : base);
 }
 
 function sleep(ms) {
@@ -493,13 +513,11 @@ function showPolaroid(p) {
   const el = document.createElement('div');
   el.className = 'polaroid';
 
-  // Polaroids appear ON the paper itself — overlapping the visible
-  // paper area (upper portion of viewport). Each new polaroid lands
-  // alternating left/right of center near the just-typed paragraph.
+  // Polaroids land on the SIDES, well clear of the central paper area.
+  // Alternating left/right columns, stacking down as more accumulate.
   const isLeft = polaroidIndex % 2 === 0;
-  const xPct = isLeft ? 0.30 : 0.70;
-  // Stack vertically downward as more accumulate (within paper area)
-  const yPct = 0.18 + (Math.floor(polaroidIndex / 2)) * 0.12;
+  const xPct = isLeft ? 0.13 : 0.87;
+  const yPct = 0.20 + (Math.floor(polaroidIndex / 2)) * 0.18;
   el.style.left = `${xPct * 100}vw`;
   el.style.top = `${yPct * 100}vh`;
 
@@ -614,17 +632,10 @@ async function boot() {
   document.getElementById('start-button').addEventListener('click', async () => {
     // Resume AudioContext (browsers require user gesture)
     if (audioCtx.state === 'suspended') await audioCtx.resume();
+    // Auto-enter fullscreen — user gesture required, this is one
+    try { await document.documentElement.requestFullscreen?.(); } catch {}
     document.getElementById('start-overlay').classList.add('hidden');
     runLetter();
-  });
-
-  // Fullscreen toggle
-  document.getElementById('fullscreen-btn')?.addEventListener('click', () => {
-    if (!document.fullscreenElement) {
-      document.documentElement.requestFullscreen?.();
-    } else {
-      document.exitFullscreen?.();
-    }
   });
 
   // Save as PDF — opens print-friendly view of letter content
