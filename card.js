@@ -1042,7 +1042,20 @@ async function boot() {
   document.getElementById('loading').classList.add('gone');
 
   if (isCalibrate) {
-    startCalibration();
+    // Calibration MUST happen in fullscreen so positions match the
+    // viewport mom will see. Show a gesture-required start button first.
+    const overlay = document.getElementById('start-overlay');
+    overlay.classList.remove('hidden');
+    document.getElementById('start-button').textContent = 'Calibrate (fullscreen)';
+    document.querySelector('.start-hint').textContent = '(click each key as prompted)';
+    document.getElementById('start-button').addEventListener('click', async () => {
+      try { await document.documentElement.requestFullscreen?.(); } catch {}
+      // Wait one frame for the resize to settle so bounds are correct
+      requestAnimationFrame(() => requestAnimationFrame(() => {
+        overlay.classList.add('hidden');
+        startCalibration();
+      }));
+    }, { once: true });
     return;
   }
 
