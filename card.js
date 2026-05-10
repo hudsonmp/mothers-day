@@ -632,6 +632,171 @@ function skipToEnd() {
   document.body.style.setProperty('--paper-cursor', 'grab');
 }
 
+// =============================================================
+// PDF transition: rip the paper off the typewriter, roll it into a
+// scroll, unfurl into a print-ready letter document, then offer print.
+// =============================================================
+
+function playRip() {
+  if (!audioCtx) return;
+  const dur = 0.5;
+  const sampleRate = audioCtx.sampleRate;
+  const buf = audioCtx.createBuffer(1, dur * sampleRate, sampleRate);
+  const data = buf.getChannelData(0);
+  for (let i = 0; i < data.length; i++) {
+    const t = i / data.length;
+    // White noise with sharp attack and exponential decay
+    data[i] = (Math.random() * 2 - 1) * Math.exp(-t * 4) * (1 - Math.exp(-t * 30));
+  }
+  const src = audioCtx.createBufferSource();
+  src.buffer = buf;
+  const filter = audioCtx.createBiquadFilter();
+  filter.type = 'bandpass';
+  filter.frequency.value = 3200;
+  filter.Q.value = 1.2;
+  const gain = audioCtx.createGain();
+  gain.gain.value = 0.22;
+  src.connect(filter).connect(gain).connect(audioCtx.destination);
+  src.start();
+}
+
+function buildPdfContent(container) {
+  // Render scenes as a flat printable letter
+  for (const scene of scenes) {
+    if (scene.paragraph) {
+      const p = document.createElement('div');
+      p.className = 'pdf-para';
+      p.textContent = scene.paragraph;
+      container.appendChild(p);
+    }
+    if (scene.polaroid) {
+      const row = document.createElement('div');
+      row.className = 'pdf-photo-row';
+      const ph = document.createElement('div');
+      ph.className = 'pdf-photo';
+      ph.style.setProperty('--tilt', `${scene.polaroid.tilt ?? 0}deg`);
+      const img = document.createElement('img');
+      img.src = scene.polaroid.src;
+      img.onerror = () => { img.style.background = '#c9a987'; img.removeAttribute('src'); };
+      ph.appendChild(img);
+      if (scene.polaroid.caption) {
+        const cap = document.createElement('div');
+        cap.className = 'pdf-photo-caption';
+        cap.textContent = scene.polaroid.caption;
+        ph.appendChild(cap);
+      }
+      row.appendChild(ph);
+      container.appendChild(row);
+    }
+  }
+}
+
+async function runPdfTransition() {
+  if (!window.gsap) return;
+
+  // Snapshot the current paper canvas (with all typed text + fold gradient)
+  const snap = document.createElement('canvas');
+  snap.width = paperCanvas.width;
+  snap.height = paperCanvas.height;
+  snap.getContext('2d').drawImage(paperCanvas, 0, 0);
+  const dataUrl = snap.toDataURL('image/png');
+
+  // Build the overlay
+  const overlay = document.createElement('div');
+  overlay.className = 'pdf-transition';
+  overlay.innerHTML = `
+    <div class="pdf-stage">
+      <div class="pdf-tear"></div>
+      <img class="pdf-image" src="${dataUrl}" alt="" />
+      <div class="pdf-content"></div>
+      <div class="pdf-shine"></div>
+    </div>
+    <div class="pdf-actions">
+      <button id="pdf-print-btn">Print / Save as PDF</button>
+      <button id="pdf-back-btn">Back to letter</button>
+    </div>
+  `;
+  document.body.appendChild(overlay);
+
+  const stage = overlay.querySelector('.pdf-stage');
+  const img = overlay.querySelector('.pdf-image');
+  const tear = overlay.querySelector('.pdf-tear');
+  const content = overlay.querySelector('.pdf-content');
+  const actions = overlay.querySelector('.pdf-actions');
+
+  buildPdfContent(content);
+
+  // Initial state — match the on-typewriter look
+  gsap.set(stage, { transformOrigin: 'center center' });
+  gsap.set(content, { opacity: 0, pointerEvents: 'none' });
+  gsap.set(actions, { opacity: 0, y: 20 });
+  gsap.set(tear, { scaleY: 0, transformOrigin: 'top center' });
+
+  // Fade overlay in quickly while paper sits at "current" state
+  await gsap.fromTo(overlay, { opacity: 0 }, { opacity: 1, duration: 0.3, ease: 'power2.out' });
+
+  const tl = gsap.timeline();
+
+  // Phase 1: RIP — shake aggressively, tear line drops down, sound, paper jolts up
+  tl.add(() => playRip());
+  tl.to(stage, {
+    keyframes: [
+      { x: -6, rotate: -0.8, duration: 0.04 },
+      { x:  7, rotate:  0.9, duration: 0.04 },
+      { x: -5, rotate: -0.6, duration: 0.04 },
+      { x:  6, rotate:  0.7, duration: 0.04 },
+      { x: -3, rotate: -0.3, duration: 0.04 },
+      { x:  0, rotate:  0,   duration: 0.05 },
+    ],
+    ease: 'power1.inOut',
+  });
+  tl.to(tear, { scaleY: 1, duration: 0.35, ease: 'power3.out' }, '<');
+  tl.to(stage, { y: -40, duration: 0.55, ease: 'power3.out' }, '<0.15');
+
+  // Phase 2: ROLL into a scroll — width compresses, slight vertical stretch
+  tl.to(stage, {
+    scaleX: 0.05,
+    scaleY: 1.08,
+    duration: 1.5,
+    ease: 'power2.inOut',
+  });
+  tl.to(tear, { opacity: 0, duration: 0.25 }, '<0.2');
+
+  // Pause holding the scroll
+  tl.to({}, { duration: 0.45 });
+
+  // Phase 3: swap — image fades, formatted PDF content fades in (still rolled)
+  tl.to(img, { opacity: 0, duration: 0.2 });
+  tl.set(stage, { className: 'pdf-stage rolled-out' });
+  tl.set(content, { opacity: 1, pointerEvents: 'auto' });
+
+  // Phase 4: UNFURL — scale back to A4-ish proportions, lift to center
+  tl.to(stage, {
+    scaleX: 1,
+    scaleY: 1,
+    y: 0,
+    duration: 1.6,
+    ease: 'power2.out',
+  });
+
+  // Phase 5: settle + reveal actions
+  tl.to(actions, { opacity: 1, y: 0, duration: 0.4, ease: 'power2.out' }, '-=0.3');
+
+  // Wire up actions
+  document.getElementById('pdf-print-btn').addEventListener('click', () => {
+    document.body.classList.add('printing');
+    requestAnimationFrame(() => {
+      window.print();
+      setTimeout(() => document.body.classList.remove('printing'), 100);
+    });
+  });
+  document.getElementById('pdf-back-btn').addEventListener('click', () => {
+    gsap.to(overlay, {
+      opacity: 0, duration: 0.4, ease: 'power2.in', onComplete: () => overlay.remove(),
+    });
+  });
+}
+
 async function runLetter() {
   for (let i = 0; i < scenes.length; i++) {
     const s = scenes[i];
@@ -780,10 +945,8 @@ async function boot() {
     }
   }
 
-  // Save as PDF — opens print-friendly view of letter content
   document.getElementById('save-pdf-btn')?.addEventListener('click', () => {
-    const w = window.open('letter-print.html', '_blank');
-    // letter-print.html auto-triggers print on load
+    runPdfTransition();
   });
 
   // Replay

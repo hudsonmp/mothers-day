@@ -296,3 +296,188 @@ html, body {
   pointer-events: auto;
 }
 
+/* ===================================================================
+   PDF transition: rip → roll into scroll → unfurl into PDF document.
+   =================================================================== */
+
+.pdf-transition {
+  position: fixed;
+  inset: 0;
+  background: radial-gradient(ellipse at center, rgba(35, 22, 14, 0.88) 0%, rgba(15, 9, 6, 0.97) 100%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  z-index: 100;
+  backdrop-filter: blur(10px);
+}
+
+.pdf-stage {
+  position: relative;
+  width: 540px;
+  height: 760px;
+  background: #f4ead4;
+  box-shadow:
+    0 30px 90px rgba(0, 0, 0, 0.65),
+    0 8px 24px rgba(0, 0, 0, 0.4),
+    inset 0 0 60px rgba(120, 90, 60, 0.08);
+  border-radius: 2px;
+  overflow: hidden;
+  transform-origin: center center;
+}
+
+.pdf-image {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: top;
+  display: block;
+}
+
+/* Tear line that drops down from the top edge during the rip */
+.pdf-tear {
+  position: absolute;
+  top: 0;
+  left: -10px;
+  right: -10px;
+  height: 14px;
+  background:
+    linear-gradient(180deg, transparent 0%, rgba(60, 40, 26, 0.4) 60%, transparent 100%),
+    repeating-linear-gradient(90deg,
+      #f4ead4 0px, #f4ead4 5px,
+      transparent 5px, transparent 8px,
+      #d4b896 8px, #d4b896 12px);
+  clip-path: polygon(
+    0% 0%, 4% 60%, 9% 20%, 14% 80%, 19% 30%, 24% 70%, 29% 25%, 34% 75%,
+    39% 35%, 44% 65%, 49% 30%, 54% 75%, 59% 25%, 64% 70%, 69% 35%, 74% 80%,
+    79% 30%, 84% 70%, 89% 20%, 94% 60%, 100% 35%, 100% 0%
+  );
+  z-index: 5;
+  filter: drop-shadow(0 4px 6px rgba(0, 0, 0, 0.3));
+}
+
+.pdf-shine {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: linear-gradient(105deg,
+    transparent 30%, rgba(255, 248, 230, 0.25) 50%, transparent 70%);
+  mix-blend-mode: overlay;
+  opacity: 0.5;
+}
+
+/* PDF content layer — fades in once the scroll unfurls into a flat doc */
+.pdf-content {
+  position: absolute;
+  inset: 0;
+  padding: 56px 48px;
+  font-family: 'Special Elite', monospace;
+  font-size: 13px;
+  line-height: 1.75;
+  color: #1f1610;
+  overflow-y: auto;
+  background: #f4ead4;
+}
+
+.pdf-para {
+  margin-bottom: 16px;
+  white-space: pre-wrap;
+}
+
+.pdf-photo-row {
+  display: flex;
+  gap: 10px;
+  margin: 12px 0 18px;
+  flex-wrap: wrap;
+  page-break-inside: avoid;
+}
+
+.pdf-photo {
+  width: 130px;
+  padding: 6px 6px 18px;
+  background: #fff;
+  box-shadow: 0 3px 8px rgba(0, 0, 0, 0.18);
+  transform: rotate(var(--tilt, 0deg));
+}
+
+.pdf-photo img {
+  width: 100%;
+  aspect-ratio: 1;
+  object-fit: cover;
+  display: block;
+}
+
+.pdf-photo-caption {
+  font-family: 'Caveat', cursive;
+  font-size: 13px;
+  color: #4a3a2a;
+  text-align: center;
+  margin-top: 4px;
+  line-height: 1.1;
+}
+
+.pdf-actions {
+  position: fixed;
+  bottom: 32px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  gap: 12px;
+  z-index: 101;
+}
+
+.pdf-actions button {
+  padding: 12px 22px;
+  font-family: 'Special Elite', monospace;
+  font-size: 0.95rem;
+  background: #f4ead4;
+  color: #1a1410;
+  border: none;
+  border-radius: 24px;
+  cursor: pointer;
+  transition: transform 0.15s, box-shadow 0.15s;
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.3);
+}
+
+.pdf-actions button:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.4);
+}
+
+#pdf-back-btn {
+  background: transparent;
+  color: #f4ead4;
+  border: 1px solid #5a4a3a;
+}
+
+/* Print rules: only the .pdf-content prints, no chrome */
+@media print {
+  body > *:not(.pdf-transition) { display: none !important; }
+  .pdf-transition {
+    background: white !important;
+    backdrop-filter: none !important;
+    position: static !important;
+    display: block !important;
+  }
+  .pdf-stage {
+    transform: none !important;
+    box-shadow: none !important;
+    width: 100% !important;
+    height: auto !important;
+    background: white !important;
+    overflow: visible !important;
+  }
+  .pdf-image, .pdf-tear, .pdf-shine, .pdf-actions { display: none !important; }
+  .pdf-content {
+    position: static !important;
+    opacity: 1 !important;
+    padding: 0 !important;
+    font-size: 12px !important;
+    line-height: 1.65 !important;
+  }
+}
+
+body.printing { overflow: hidden; }
+
