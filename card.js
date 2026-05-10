@@ -1449,6 +1449,9 @@ function isOverPaper(mx, my) {
 
 window.addEventListener('wheel', (e) => {
   if (!letterCompleted) return;
+  // If the wheel event is over any overlay (PDF, calibration, etc.),
+  // let the browser handle it natively so the overlay can scroll.
+  if (e.target.closest('.pdf-transition, #scrollcal-ui, #calibrate-ui, #post-actions')) return;
   if (!isOverPaper(e.clientX, e.clientY)) return;
   e.preventDefault();
   const lines = wordWrap(textBuffer, MAX_TEXT_WIDTH);
