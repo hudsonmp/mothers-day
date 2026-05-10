@@ -64,10 +64,13 @@ Two-line local server (Python comes preinstalled on macOS):
 
 ```bash
 cd ~/mothers-day
-python3 -m http.server 8000
+python3 -m http.server 3001
 ```
 
-Then open http://localhost:8000 — click "Open the letter" to start.
+Then open http://localhost:3001 — click "Open the letter" to start.
+
+- `/edit` — content editor (auto-saves to localStorage)
+- `/test` — same as `/` but with a "Skip to end" button to bypass the typing animation
 
 ## Development log: bone introspection
 

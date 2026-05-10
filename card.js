@@ -39,12 +39,12 @@ function row(chars, y, z, xStart, xStep) {
   return out;
 }
 const KEY_WORLD = {
-  ...row(['q','w','e','r','t','y','u','i','o','p'], 0.34, 0.45, -0.65, 0.143),
-  ...row(['a','s','d','f','g','h','j','k','l'],     0.22, 0.58, -0.58, 0.143),
-  ...row(['z','x','c','v','b','n','m'],             0.10, 0.71, -0.43, 0.143),
-  ',': [0.50, 0.10, 0.71],
-  '.': [0.65, 0.10, 0.71],
-  ' ': [0.0, -0.02, 0.78],
+  ...row(['q','w','e','r','t','y','u','i','o','p'], 0.18, 0.45, -0.65, 0.143),
+  ...row(['a','s','d','f','g','h','j','k','l'],     0.06, 0.58, -0.58, 0.143),
+  ...row(['z','x','c','v','b','n','m'],            -0.06, 0.71, -0.43, 0.143),
+  ',': [0.50, -0.06, 0.71],
+  '.': [0.65, -0.06, 0.71],
+  ' ': [0.0,  -0.18, 0.78],
 };
 
 const _projectVec = new (class { constructor(){} })(); // placeholder, replaced below
@@ -213,6 +213,12 @@ function wordWrap(text, maxWidth) {
 const TYPE_LINE_Y = Math.round(PAPER_HEIGHT_PX * 0.55);
 let _lastNewlineCount = 0;
 
+// scrollOffset: post-letter UI state. Positive = paper pulled down so
+// older lines (originally clipped above) come into view at the type
+// position. Only adjustable after letterCompleted = true.
+let scrollOffset = 0;
+let letterCompleted = false;
+
 function repaintPaper() {
   paintPaperBackground();
   pctx.font = `${FONT_SIZE}px "Special Elite", monospace`;
@@ -220,13 +226,12 @@ function repaintPaper() {
   pctx.textBaseline = 'top';
 
   const lines = wordWrap(textBuffer, MAX_TEXT_WIDTH);
-  // Render so the LAST line sits at TYPE_LINE_Y. Earlier lines stack
-  // upward (smaller canvas Y → higher in viewport). Anything above
-  // the top margin gets occluded by the fold gradient (scroll off effect).
+  // Render so the LAST line sits at TYPE_LINE_Y, plus scrollOffset
+  // (post-letter scrollback). Earlier lines stack upward.
   for (let i = 0; i < lines.length; i++) {
-    const y = TYPE_LINE_Y - (lines.length - 1 - i) * LINE_HEIGHT;
-    if (y < -LINE_HEIGHT) continue;                  // way off the top
-    if (y > TYPE_LINE_Y) break;
+    const y = TYPE_LINE_Y - (lines.length - 1 - i) * LINE_HEIGHT + scrollOffset;
+    if (y < -LINE_HEIGHT) continue;
+    if (y > PAPER_HEIGHT_PX) break;
     pctx.fillText(lines[i], MARGIN_X, y);
   }
 
@@ -281,9 +286,14 @@ function playClick() {
   src.buffer = clickBuffer;
   src.playbackRate.value = 0.92 + Math.random() * 0.16; // 0.92 - 1.08
   const gain = audioCtx.createGain();
-  gain.gain.value = 0.5;
+  // Trim to ~80ms percussive front. The freesound clip has ambient
+  // tail that, when stacked at typing speed, sounds like background noise.
+  const now = audioCtx.currentTime;
+  gain.gain.setValueAtTime(0.5, now);
+  gain.gain.exponentialRampToValueAtTime(0.001, now + 0.08);
   src.connect(gain).connect(audioCtx.destination);
   src.start();
+  src.stop(now + 0.1);
 }
 
 function playDing() {
@@ -576,25 +586,39 @@ async function showDoodle(d) {
 // =============================================================
 // Master sequencer
 // =============================================================
+const isTestMode = new URLSearchParams(location.search).has('test')
+  || location.pathname.startsWith('/test');
+
+function skipToEnd() {
+  for (const s of scenes) {
+    if (s.polaroid) showPolaroid(s.polaroid);
+    if (s.doodle) showDoodle(s.doodle);
+    let para = s.paragraph || '';
+    if (!para.endsWith('\n\n')) para = para.replace(/\n*$/, '') + '\n\n';
+    textBuffer += para;
+  }
+  repaintPaper();
+  document.getElementById('post-actions')?.classList.add('visible');
+  letterCompleted = true;
+  document.body.style.setProperty('--paper-cursor', 'grab');
+}
+
 async function runLetter() {
   for (let i = 0; i < scenes.length; i++) {
     const s = scenes[i];
     if (s.polaroid) showPolaroid(s.polaroid);
     if (s.doodle) showDoodle(s.doodle);
-    // Small breath before typing so the polaroid/doodle is visible first
     await sleep(700);
 
-    // Ensure paragraph break BETWEEN scenes — append \n if the
-    // current paragraph doesn't already end with one. This guarantees
-    // visual separation regardless of how the user wrote the text.
     let para = s.paragraph || '';
     if (i < scenes.length - 1 && !para.endsWith('\n\n')) {
       para = para.replace(/\n*$/, '') + '\n\n';
     }
     await typeParagraph(para);
   }
-  // Letter complete — reveal the post-letter actions
   document.getElementById('post-actions')?.classList.add('visible');
+  letterCompleted = true;
+  document.body.style.setProperty('--paper-cursor', 'grab');
 }
 
 // =============================================================
@@ -610,6 +634,44 @@ window.addEventListener('resize', () => {
   camera.updateProjectionMatrix();
   renderer.setSize(window.innerWidth, window.innerHeight);
 });
+
+// Two-finger scroll over the paper to scroll back through the typed
+// letter. Only enabled after letter completes.
+const _paperCorners = [
+  new THREE.Vector3(),
+  new THREE.Vector3(),
+  new THREE.Vector3(),
+  new THREE.Vector3(),
+];
+function isOverPaper(mx, my) {
+  if (!paperPlane) return false;
+  const w = paperPlane.geometry.parameters.width / 2;
+  const h = paperPlane.geometry.parameters.height / 2;
+  _paperCorners[0].set(-w, -h, 0);
+  _paperCorners[1].set( w, -h, 0);
+  _paperCorners[2].set( w,  h, 0);
+  _paperCorners[3].set(-w,  h, 0);
+  let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+  for (const v of _paperCorners) {
+    v.applyMatrix4(paperPlane.matrixWorld).project(camera);
+    const sx = (v.x + 1) / 2 * window.innerWidth;
+    const sy = (-v.y + 1) / 2 * window.innerHeight;
+    minX = Math.min(minX, sx); maxX = Math.max(maxX, sx);
+    minY = Math.min(minY, sy); maxY = Math.max(maxY, sy);
+  }
+  return mx >= minX && mx <= maxX && my >= minY && my <= maxY;
+}
+
+window.addEventListener('wheel', (e) => {
+  if (!letterCompleted) return;
+  if (!isOverPaper(e.clientX, e.clientY)) return;
+  e.preventDefault();
+  const lines = wordWrap(textBuffer, MAX_TEXT_WIDTH);
+  const maxScroll = Math.max(0, (lines.length - 1) * LINE_HEIGHT);
+  // deltaY negative (scroll up / two-finger swipe down) → see older content
+  scrollOffset = Math.max(0, Math.min(maxScroll, scrollOffset - e.deltaY * 0.5));
+  repaintPaper();
+}, { passive: false });
 
 // =============================================================
 // Boot
@@ -630,13 +692,28 @@ async function boot() {
   document.getElementById('start-overlay').classList.remove('hidden');
 
   document.getElementById('start-button').addEventListener('click', async () => {
-    // Resume AudioContext (browsers require user gesture)
     if (audioCtx.state === 'suspended') await audioCtx.resume();
-    // Auto-enter fullscreen — user gesture required, this is one
     try { await document.documentElement.requestFullscreen?.(); } catch {}
     document.getElementById('start-overlay').classList.add('hidden');
     runLetter();
   });
+
+  // Inject Skip-to-end button in test mode
+  if (isTestMode) {
+    const overlay = document.getElementById('start-overlay');
+    if (overlay && !document.getElementById('skip-end-btn')) {
+      const skip = document.createElement('button');
+      skip.id = 'skip-end-btn';
+      skip.textContent = 'Skip to end';
+      skip.style.cssText = 'margin-top:14px;padding:14px 28px;font-family:Special Elite,monospace;font-size:1.1rem;background:transparent;color:#f4ead4;border:1px solid #8b7355;border-radius:6px;cursor:pointer;';
+      skip.addEventListener('click', async () => {
+        if (audioCtx.state === 'suspended') await audioCtx.resume();
+        document.getElementById('start-overlay').classList.add('hidden');
+        skipToEnd();
+      });
+      overlay.appendChild(skip);
+    }
+  }
 
   // Save as PDF — opens print-friendly view of letter content
   document.getElementById('save-pdf-btn')?.addEventListener('click', () => {
