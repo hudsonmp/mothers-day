@@ -139,6 +139,7 @@ renderer.setSize(window.innerWidth, window.innerHeight);
 renderer.outputColorSpace = THREE.SRGBColorSpace;
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
 renderer.toneMappingExposure = 1.1;
+renderer.localClippingEnabled = true;
 
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x1a1410);
@@ -366,6 +367,37 @@ const loader = new GLTFLoader();
 let scrollOpenMesh = null;     // the unrolled / open scroll surface
 let scrollClosedMeshes = [];   // the rolled-up scrolls
 
+// Scroll crop bounds (world coords) — saved from /scroll-cal
+function loadScrollCrop() {
+  try {
+    const raw = localStorage.getItem('scrollCrop');
+    if (raw) return JSON.parse(raw);
+  } catch {}
+  return null;
+}
+
+function applyScrollCrop(p1, p2) {
+  if (!scrollRoot) return;
+  const minX = Math.min(p1[0], p2[0]);
+  const maxX = Math.max(p1[0], p2[0]);
+  const minY = Math.min(p1[1], p2[1]);
+  const maxY = Math.max(p1[1], p2[1]);
+  const planes = [
+    new THREE.Plane(new THREE.Vector3( 1,  0, 0), -minX),
+    new THREE.Plane(new THREE.Vector3(-1,  0, 0),  maxX),
+    new THREE.Plane(new THREE.Vector3( 0,  1, 0), -minY),
+    new THREE.Plane(new THREE.Vector3( 0, -1, 0),  maxY),
+  ];
+  scrollRoot.traverse(n => {
+    if (n.material) {
+      n.material.clippingPlanes = planes;
+      n.material.clipShadows = true;
+      n.material.side = THREE.DoubleSide; // both sides of the cut visible
+    }
+  });
+  renderer.localClippingEnabled = true;
+}
+
 function loadScroll() {
   return new Promise((resolve) => {
     loader.load(
@@ -415,6 +447,12 @@ function loadScroll() {
 
         scrollRoot.visible = false;
         scene.add(scrollRoot);
+
+        // Apply saved crop if present
+        const savedCrop = loadScrollCrop();
+        if (savedCrop && savedCrop.length === 2) {
+          applyScrollCrop(savedCrop[0], savedCrop[1]);
+        }
 
         // Expose for debugging
         window.scrollDebug = { root: scrollRoot, open: scrollOpenMesh, closed: scrollClosedMeshes, meshes };
@@ -706,9 +744,11 @@ const isTestMode = new URLSearchParams(location.search).has('test')
 const _calibrateParam = new URLSearchParams(location.search).get('calibrate');
 const isCalibrate = _calibrateParam !== null
   || location.pathname.startsWith('/calibrate');
-// Optional: ?calibrate=newline calibrates only that one key (merges with existing)
 const calibrateOnlyKey = (_calibrateParam && _calibrateParam !== '1' && _calibrateParam !== '')
   ? _calibrateParam : null;
+
+const isScrollCal = new URLSearchParams(location.search).has('scrollcal')
+  || location.pathname.startsWith('/scroll-cal');
 
 // Order in which calibration prompts each key
 const CALIBRATE_KEYS = [
@@ -819,6 +859,99 @@ function startCalibration(onlyKey = null) {
     idx--;
     update();
   });
+}
+
+function startScrollCalibration() {
+  if (!scrollRoot) {
+    alert('Scroll model not loaded');
+    return;
+  }
+  // Make scroll fully visible at its rest position
+  scrollRoot.visible = true;
+  scrollRoot.traverse(n => {
+    if (n.material) {
+      n.material.transparent = false;
+      n.material.opacity = 1;
+      // Clear any existing clipping
+      n.material.clippingPlanes = null;
+    }
+  });
+  renderer.localClippingEnabled = false;
+
+  const ui = document.createElement('div');
+  ui.id = 'scrollcal-ui';
+  ui.innerHTML = `
+    <div class="prompt">
+      <div id="sc-step" class="cal-line">Click <b>top-left</b> corner of the OPEN scroll</div>
+      <div class="cal-progress"><span id="sc-done">0</span> / 2</div>
+    </div>
+    <div class="cal-actions">
+      <button id="sc-reset" class="cal-btn">Reset</button>
+      <button id="sc-clear" class="cal-btn">Clear saved crop</button>
+    </div>
+  `;
+  document.body.appendChild(ui);
+
+  let points = [];
+  const STEPS = ['top-left', 'bottom-right'];
+  const raycaster = new THREE.Raycaster();
+
+  function update() {
+    document.getElementById('sc-done').textContent = points.length;
+    if (points.length === 2) {
+      // Apply preview clipping
+      applyScrollCrop(points[0], points[1]);
+      document.getElementById('sc-step').innerHTML =
+        `Crop applied. <button id="sc-save" class="cal-btn primary">Save & exit</button>`;
+      document.getElementById('sc-save').addEventListener('click', () => {
+        localStorage.setItem('scrollCrop', JSON.stringify(points));
+        location.href = '/';
+      });
+    } else {
+      document.getElementById('sc-step').innerHTML =
+        `Click <b>${STEPS[points.length]}</b> corner of the OPEN scroll`;
+    }
+  }
+
+  function captureClick(e) {
+    if (points.length >= 2) return;
+    if (e.target.closest('#scrollcal-ui')) return;
+
+    const rect = renderer.domElement.getBoundingClientRect();
+    const ndcX = ((e.clientX - rect.left) / rect.width) * 2 - 1;
+    const ndcY = -(((e.clientY - rect.top) / rect.height) * 2 - 1);
+    raycaster.setFromCamera(new THREE.Vector2(ndcX, ndcY), camera);
+    const hits = raycaster.intersectObject(scrollRoot, true);
+    let pt;
+    if (hits.length > 0) {
+      pt = hits[0].point.clone();
+    } else {
+      // Fallback: project at scroll center depth
+      const center = new THREE.Vector3();
+      new THREE.Box3().setFromObject(scrollRoot).getCenter(center);
+      pt = new THREE.Vector3(ndcX, ndcY, 0).unproject(camera);
+      pt.z = center.z;
+    }
+    points.push([+pt.x.toFixed(3), +pt.y.toFixed(3), +pt.z.toFixed(3)]);
+    update();
+  }
+
+  document.addEventListener('click', captureClick);
+
+  document.getElementById('sc-reset').addEventListener('click', () => {
+    points = [];
+    scrollRoot.traverse(n => {
+      if (n.material) n.material.clippingPlanes = null;
+    });
+    renderer.localClippingEnabled = false;
+    update();
+  });
+  document.getElementById('sc-clear').addEventListener('click', () => {
+    localStorage.removeItem('scrollCrop');
+    location.href = '/';
+  });
+
+  update();
 }
 
 function formatCalibrateOutput(captured) {
@@ -1185,9 +1318,22 @@ async function boot() {
 
   document.getElementById('loading').classList.add('gone');
 
+  if (isScrollCal) {
+    const overlay = document.getElementById('start-overlay');
+    overlay.classList.remove('hidden');
+    document.getElementById('start-button').textContent = 'Crop scroll (fullscreen)';
+    document.querySelector('.start-hint').textContent = '(click top-left and bottom-right of the open scroll)';
+    document.getElementById('start-button').addEventListener('click', async () => {
+      try { await document.documentElement.requestFullscreen?.(); } catch {}
+      requestAnimationFrame(() => requestAnimationFrame(() => {
+        overlay.classList.add('hidden');
+        startScrollCalibration();
+      }));
+    }, { once: true });
+    return;
+  }
+
   if (isCalibrate) {
-    // Calibration MUST happen in fullscreen so positions match the
-    // viewport mom will see. Show a gesture-required start button first.
     const overlay = document.getElementById('start-overlay');
     overlay.classList.remove('hidden');
     document.getElementById('start-button').textContent = 'Calibrate (fullscreen)';
