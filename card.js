@@ -28,37 +28,66 @@ const scenes = loadScenes();
 const KEYMAP = {};
 
 // =============================================================
-// KEY_WORLD — approximate 3D positions of each letter key on the
-// post-auto-fit typewriter (typewriter occupies x = -1..1 after scale).
-// Projected to screen each time, so dots stay aligned regardless of
-// viewport size, aspect ratio, or fullscreen state.
+// KEY_TYPEWRITER_PCT — each key as a (x, y) percentage within the
+// typewriter's projected screen bounding box. This stays accurate
+// across any viewport / fullscreen because we recompute the bounds
+// from the auto-fit typewriter every frame.
+//
+// Layout of the Underwood from the 3/4 hero shot:
+//   Top row (Q-P)     ≈ y 0.45
+//   Middle row (A-L)  ≈ y 0.58
+//   Bottom row (Z-M)  ≈ y 0.71
+//   Keys span x 0.12 → 0.78 (slightly inset from typewriter edges)
 // =============================================================
-function row(chars, y, z, xStart, xStep) {
+function row(chars, y, xStart, xStep) {
   const out = {};
-  chars.forEach((c, i) => { out[c] = [xStart + i * xStep, y, z]; });
+  chars.forEach((c, i) => { out[c] = [xStart + i * xStep, y]; });
   return out;
 }
-const KEY_WORLD = {
-  ...row(['q','w','e','r','t','y','u','i','o','p'], 0.18, 0.45, -0.65, 0.143),
-  ...row(['a','s','d','f','g','h','j','k','l'],     0.06, 0.58, -0.58, 0.143),
-  ...row(['z','x','c','v','b','n','m'],            -0.06, 0.71, -0.43, 0.143),
-  ',': [0.50, -0.06, 0.71],
-  '.': [0.65, -0.06, 0.71],
-  ' ': [0.0,  -0.18, 0.78],
+const KEY_TYPEWRITER_PCT = {
+  ...row(['q','w','e','r','t','y','u','i','o','p'], 0.46, 0.115, 0.073),
+  ...row(['a','s','d','f','g','h','j','k','l'],     0.58, 0.150, 0.073),
+  ...row(['z','x','c','v','b','n','m'],             0.70, 0.190, 0.073),
+  ',': [0.700, 0.70],
+  '.': [0.770, 0.70],
+  ' ': [0.500, 0.84],
 };
 
-const _projectVec = new (class { constructor(){} })(); // placeholder, replaced below
-// Use THREE.Vector3 lazily after import
-let _kpVec = null;
+const _kpVec = { _v: null };
+function _vec3() {
+  if (!_kpVec._v) _kpVec._v = new THREE.Vector3();
+  return _kpVec._v;
+}
+
+function getTypewriterScreenBounds() {
+  if (!typewriterRoot) return null;
+  const box = new THREE.Box3().setFromObject(typewriterRoot);
+  let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+  const v = _vec3();
+  const corners = [
+    [box.min.x, box.min.y, box.min.z], [box.max.x, box.min.y, box.min.z],
+    [box.min.x, box.max.y, box.min.z], [box.max.x, box.max.y, box.min.z],
+    [box.min.x, box.min.y, box.max.z], [box.max.x, box.min.y, box.max.z],
+    [box.min.x, box.max.y, box.max.z], [box.max.x, box.max.y, box.max.z],
+  ];
+  for (const [x, y, z] of corners) {
+    v.set(x, y, z).project(camera);
+    const sx = (v.x + 1) / 2 * window.innerWidth;
+    const sy = (-v.y + 1) / 2 * window.innerHeight;
+    if (sx < minX) minX = sx; if (sx > maxX) maxX = sx;
+    if (sy < minY) minY = sy; if (sy > maxY) maxY = sy;
+  }
+  return { left: minX, top: minY, width: maxX - minX, height: maxY - minY };
+}
 
 function flashKey(c) {
   const lower = String(c).toLowerCase();
-  const arr = KEY_WORLD[lower];
-  if (!arr) return;
-  if (!_kpVec) _kpVec = new THREE.Vector3();
-  _kpVec.set(arr[0], arr[1], arr[2]).project(camera);
-  const x = (_kpVec.x + 1) / 2 * window.innerWidth;
-  const y = (-_kpVec.y + 1) / 2 * window.innerHeight;
+  const pct = KEY_TYPEWRITER_PCT[lower];
+  if (!pct) return;
+  const b = getTypewriterScreenBounds();
+  if (!b) return;
+  const x = b.left + pct[0] * b.width;
+  const y = b.top + pct[1] * b.height;
 
   const layer = document.getElementById('key-overlay');
   if (!layer) return;
@@ -668,10 +697,46 @@ window.addEventListener('wheel', (e) => {
   e.preventDefault();
   const lines = wordWrap(textBuffer, MAX_TEXT_WIDTH);
   const maxScroll = Math.max(0, (lines.length - 1) * LINE_HEIGHT);
-  // deltaY negative (scroll up / two-finger swipe down) → see older content
   scrollOffset = Math.max(0, Math.min(maxScroll, scrollOffset - e.deltaY * 0.5));
   repaintPaper();
 }, { passive: false });
+
+// After the letter completes, the user can keep typing on the paper.
+// Real keyboard input is captured and appended to the text buffer.
+window.addEventListener('keydown', (e) => {
+  if (!letterCompleted) return;
+  // Skip if user is typing in an input/textarea elsewhere
+  const tag = (e.target?.tagName || '').toLowerCase();
+  if (tag === 'input' || tag === 'textarea') return;
+  // Ignore modifier-only or function keys (let browser handle)
+  if (e.metaKey || e.ctrlKey || e.altKey) return;
+
+  let c = null;
+  if (e.key === 'Enter') c = '\n';
+  else if (e.key === 'Backspace') {
+    if (textBuffer.length > 0) {
+      e.preventDefault();
+      textBuffer = textBuffer.slice(0, -1);
+      scrollOffset = 0;
+      repaintPaper();
+    }
+    return;
+  }
+  else if (e.key.length === 1) c = e.key;
+
+  if (c) {
+    e.preventDefault();
+    textBuffer += c;
+    scrollOffset = 0;
+    repaintPaper();
+    if (c !== '\n' && c !== ' ') {
+      flashKey(c);
+      playClick();
+    } else if (c === '\n') {
+      playDing();
+    }
+  }
+});
 
 // =============================================================
 // Boot
