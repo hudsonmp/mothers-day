@@ -117,7 +117,7 @@ function flashKey(c) {
 // Constants
 // =============================================================
 const GLB_PATH = 'assets/typewriter.glb';
-const SCROLL_GLB_PATH = 'assets/scroll.glb';
+const SCROLL_GLB_PATH = 'assets/scrolls.glb';
 const CLICK_PATH = 'assets/sounds/click.mp3';
 const DING_PATH = 'assets/sounds/ding.mp3';
 
@@ -362,28 +362,68 @@ let carriageRoot = null;    // for thunk-shake fallback
 
 const loader = new GLTFLoader();
 
+// Refs to specific meshes inside the scroll GLB
+let scrollOpenMesh = null;     // the unrolled / open scroll surface
+let scrollClosedMeshes = [];   // the rolled-up scrolls
+
 function loadScroll() {
   return new Promise((resolve) => {
     loader.load(
       SCROLL_GLB_PATH,
       (gltf) => {
         scrollRoot = gltf.scene;
-        // Auto-fit: scroll target ~1.6 world units wide
+
+        // Inventory all named meshes — we want to find the OPEN one (likely
+        // larger/flatter) so we can project the letter text onto it.
+        const meshes = [];
+        scrollRoot.traverse((n) => {
+          if (n.isMesh) {
+            const b = new THREE.Box3().setFromObject(n);
+            const sz = b.getSize(new THREE.Vector3());
+            meshes.push({
+              node: n, name: n.name,
+              w: sz.x, h: sz.y, d: sz.z,
+              flatness: Math.max(sz.x, sz.z) / Math.max(sz.y, 0.001),
+            });
+          }
+        });
+        console.log('=== SCROLL GLB MESHES ===');
+        console.table(meshes.map(m => ({
+          name: m.name, w: m.w.toFixed(2), h: m.h.toFixed(2), d: m.d.toFixed(2),
+          flatness: m.flatness.toFixed(2),
+        })));
+
+        // Pick the flattest mesh (largest x*z relative to y) as the OPEN scroll
+        meshes.sort((a, b) => b.flatness - a.flatness);
+        scrollOpenMesh = meshes[0]?.node || null;
+        scrollClosedMeshes = meshes.slice(1).map(m => m.node);
+        console.log('Open scroll:', scrollOpenMesh?.name);
+        console.log('Closed scrolls:', scrollClosedMeshes.map(m => m.name));
+
+        // Rotate to vertical — scroll lies on a surface in the GLB,
+        // tilt it up to face camera so the open parchment is readable.
+        scrollRoot.rotation.x = -Math.PI / 2;
+
+        // Auto-fit AFTER rotation so bounding box reflects the new orientation
         const box = new THREE.Box3().setFromObject(scrollRoot);
         const size = box.getSize(new THREE.Vector3());
-        const targetWidth = 1.6;
-        scrollRoot.scale.setScalar(targetWidth / Math.max(size.x, 0.01));
-        const center = box.getCenter(new THREE.Vector3()).multiplyScalar(scrollRoot.scale.x);
-        scrollRoot.position.set(-center.x, -box.min.y * scrollRoot.scale.x, -center.z);
-        // Hidden until PDF transition runs
+        const targetHeight = 2.4;
+        const scale = targetHeight / Math.max(size.y, 0.01);
+        scrollRoot.scale.setScalar(scale);
+        const c = box.getCenter(new THREE.Vector3()).multiplyScalar(scale);
+        scrollRoot.position.set(-c.x, -c.y, -c.z);
+
         scrollRoot.visible = false;
         scene.add(scrollRoot);
-        console.log('Scroll GLB loaded');
+
+        // Expose for debugging
+        window.scrollDebug = { root: scrollRoot, open: scrollOpenMesh, closed: scrollClosedMeshes, meshes };
+
         resolve(scrollRoot);
       },
       undefined,
       () => {
-        console.warn('No scroll GLB at', SCROLL_GLB_PATH, '— PDF transition will use fallback animation');
+        console.warn('No scroll GLB at', SCROLL_GLB_PATH);
         resolve(null);
       }
     );
@@ -925,15 +965,11 @@ async function runPdfTransition() {
     });
 
   // ===========================================================
-  // PHASE 2 — SCROLL APPEARS: scroll model fades in centered
+  // PHASE 2 — VERTICAL SCROLL FADES IN as backdrop, then PDF text
+  //           overlays directly on the open scroll's parchment surface.
+  //           Text appears via center-out clip-path reveal with blur.
   // ===========================================================
   scrollRoot.visible = true;
-  scrollRoot.position.set(0, 0.6, 0.3);
-  scrollRoot.rotation.set(0, 0, 0);
-  scrollRoot.scale.setScalar(scrollRoot.userData._restScale ?? scrollRoot.scale.x);
-  if (scrollRoot.userData._restScale === undefined) {
-    scrollRoot.userData._restScale = scrollRoot.scale.x;
-  }
   scrollRoot.traverse(n => {
     if (n.material) {
       n.material.transparent = true;
@@ -941,34 +977,12 @@ async function runPdfTransition() {
     }
   });
 
-  await gsap.timeline()
-    .to(scrollRoot.position, { y: 1.0, duration: 0.7, ease: 'power2.out' }, 0)
-    .to({}, {
-      duration: 0.7,
-      onUpdate: function() {
-        const o = this.progress();
-        scrollRoot.traverse(n => { if (n.material) n.material.opacity = o; });
-      },
-    }, 0)
-    .then(() => {});
-
-  // Brief hold so the scroll is appreciable
-  await gsap.to({}, { duration: 0.4 });
-
-  // ===========================================================
-  // PHASE 3 — UNFURL: 3D scroll fades out while a partially-unrolled
-  //           SVG scroll appears, the parchment middle widens with a
-  //           blur that recedes outward, then PDF content fades in.
-  //           The scroll ENDS (rolled cylinders) stay visible.
-  // ===========================================================
+  // Build text overlay positioned over the visible scroll area
   const pdfOverlay = document.createElement('div');
-  pdfOverlay.className = 'pdf-transition unrolled-mode';
+  pdfOverlay.className = 'pdf-transition scroll-mode';
   pdfOverlay.innerHTML = `
-    <div class="unrolled-scroll">
-      <object class="scroll-svg" type="image/svg+xml" data="assets/scroll-unrolled.svg"></object>
-      <div class="scroll-content-mask">
-        <div class="pdf-content"></div>
-      </div>
+    <div class="scroll-text-region">
+      <div class="pdf-content"></div>
       <div class="scroll-blur"></div>
     </div>
     <div class="pdf-actions">
@@ -978,54 +992,45 @@ async function runPdfTransition() {
   `;
   document.body.appendChild(pdfOverlay);
 
-  const unrolled = pdfOverlay.querySelector('.unrolled-scroll');
-  const contentMask = pdfOverlay.querySelector('.scroll-content-mask');
+  const textRegion = pdfOverlay.querySelector('.scroll-text-region');
   const pdfContent = pdfOverlay.querySelector('.pdf-content');
   const blur = pdfOverlay.querySelector('.scroll-blur');
   const pdfActions = pdfOverlay.querySelector('.pdf-actions');
 
   buildPdfContent(pdfContent);
 
-  // Initial state: middle clip-path closed at center, full blur, content hidden
+  // Initial state: overlay invisible, text hidden behind clip + full blur
   gsap.set(pdfOverlay, { opacity: 0 });
-  gsap.set(contentMask, { clipPath: 'inset(0 50% 0 50%)', opacity: 0 });
-  gsap.set(blur, { opacity: 1 });
+  gsap.set(pdfContent, { clipPath: 'inset(0 50% 0 50%)' });
   gsap.set(pdfActions, { opacity: 0, y: 20 });
 
-  // Cross-fade: 3D scroll out, SVG unrolled in
+  // Phase 2a: scroll fades in (3D), backdrop dims
   await gsap.timeline()
-    .to(scrollRoot.rotation, { y: Math.PI * 0.5, duration: 0.9, ease: 'power2.inOut' }, 0)
     .to({}, {
-      duration: 0.9,
+      duration: 0.8,
       onUpdate: function() {
-        const o = 1 - this.progress();
+        const o = this.progress();
         scrollRoot.traverse(n => { if (n.material) n.material.opacity = o; });
       },
     }, 0)
-    .to(pdfOverlay, { opacity: 1, duration: 0.5, ease: 'power2.out' }, 0.3)
-    .then(() => { scrollRoot.visible = false; });
+    .to(pdfOverlay, { opacity: 1, duration: 0.5, ease: 'power2.out' }, 0.3);
 
-  // Unroll: clip-path opens left+right from center, blur recedes outward,
-  // PDF content fades in mid-way through.
+  // Phase 2b: text reveals on the scroll, blur recedes from center
   await gsap.timeline()
-    .to(contentMask, { opacity: 1, duration: 0.3, ease: 'power2.out' }, 0)
-    .to(contentMask, {
+    .to(pdfContent, {
       clipPath: 'inset(0 0% 0 0%)',
       duration: 1.6,
       ease: 'power2.out',
-    }, 0.05)
-    // Blur ring shrinks from full (covering center) down to nothing
-    .to(blur, {
+    }, 0)
+    .to({}, {
       duration: 1.6,
       ease: 'power2.out',
       onUpdate: function() {
-        // 0 = no blur visible, 1 = full blur covers everything
         const p = 1 - this.progress();
-        // Width grows then shrinks the blur band; opacity fades
-        blur.style.opacity = String(p * 0.6);
-        blur.style.transform = `translateX(-50%) scaleX(${0.05 + p * 0.95})`;
+        blur.style.opacity = String(p * 0.55);
+        blur.style.transform = `translate(-50%, -50%) scaleX(${0.05 + p * 0.95})`;
       },
-    }, 0.05)
+    }, 0)
     .to(pdfActions, { opacity: 1, y: 0, duration: 0.4, ease: 'power2.out' }, '-=0.3');
 
   // ===========================================================
