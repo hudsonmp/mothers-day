@@ -481,6 +481,67 @@ html, body {
 
 body.printing { overflow: hidden; }
 
+/* Simple PDF overlay (no scroll animation) — parchment background */
+.pdf-transition.simple-mode {
+  background: rgba(15, 9, 6, 0.95);
+  backdrop-filter: blur(10px);
+}
+
+.pdf-stage.simple {
+  width: min(640px, 92vw);
+  max-height: 88vh;
+  background: #f4ead4;
+  padding: 56px 48px;
+  border-radius: 4px;
+  box-shadow: 0 30px 80px rgba(0, 0, 0, 0.6);
+  font-family: 'Special Elite', monospace;
+  font-size: 13px;
+  line-height: 1.7;
+  color: #1f1610;
+  overflow-y: auto;
+}
+
+.pdf-stage.simple .pdf-para {
+  margin-bottom: 16px;
+  white-space: pre-wrap;
+}
+
+.pdf-stage.simple .pdf-photo-row {
+  display: flex;
+  gap: 10px;
+  margin: 12px 0 18px;
+  flex-wrap: wrap;
+}
+
+.pdf-stage.simple .pdf-photo {
+  width: 130px;
+  padding: 6px 6px 18px;
+  background: #fff;
+  box-shadow: 0 3px 8px rgba(0, 0, 0, 0.18);
+  transform: rotate(var(--tilt, 0deg));
+}
+
+.pdf-stage.simple .pdf-photo img {
+  width: 100%;
+  aspect-ratio: 1;
+  object-fit: cover;
+  display: block;
+}
+
+.pdf-stage.simple .pdf-photo-caption {
+  font-family: 'Caveat', cursive;
+  font-size: 13px;
+  color: #4a3a2a;
+  text-align: center;
+  margin-top: 4px;
+}
+
+@media print {
+  .pdf-transition.simple-mode { background: white !important; }
+  .pdf-stage.simple { box-shadow: none !important; max-height: none !important; }
+  .pdf-actions { display: none !important; }
+}
+
 /* ===================================================================
    Scroll-mode PDF view: the 3D scroll model is visible behind, with
    the formatted letter overlaid directly on the parchment surface.

@@ -1207,9 +1207,45 @@ function drawTearLine(progress) {
 }
 
 async function runPdfTransition() {
-  if (!window.gsap) return;
+  // Simple version: fade in a parchment overlay with the formatted letter,
+  // Print + Back buttons. No scroll/tear animation.
+  const overlay = document.createElement('div');
+  overlay.className = 'pdf-transition simple-mode';
+  overlay.innerHTML = `
+    <div class="pdf-stage simple">
+      <div class="pdf-content"></div>
+    </div>
+    <div class="pdf-actions">
+      <button id="pdf-print-btn">Print / Save as PDF</button>
+      <button id="pdf-back-btn">Back to letter</button>
+    </div>
+  `;
+  document.body.appendChild(overlay);
+  buildPdfContent(overlay.querySelector('.pdf-content'));
+
+  if (window.gsap) {
+    gsap.set(overlay, { opacity: 0 });
+    gsap.to(overlay, { opacity: 1, duration: 0.4, ease: 'power2.out' });
+  }
+
+  document.getElementById('pdf-print-btn').addEventListener('click', () => {
+    document.body.classList.add('printing');
+    requestAnimationFrame(() => {
+      window.print();
+      setTimeout(() => document.body.classList.remove('printing'), 100);
+    });
+  });
+  document.getElementById('pdf-back-btn').addEventListener('click', () => {
+    if (window.gsap) {
+      gsap.to(overlay, { opacity: 0, duration: 0.3, onComplete: () => overlay.remove() });
+    } else {
+      overlay.remove();
+    }
+  });
+  return;
+
+  // ---- old animation code below (unreachable) ----
   if (!scrollRoot) {
-    console.warn('No scroll model loaded; opening print view directly');
     window.open('letter-print.html', '_blank');
     return;
   }
