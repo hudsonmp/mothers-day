@@ -155,29 +155,17 @@ const paperMaterial = new THREE.MeshStandardMaterial({
   side: THREE.DoubleSide,
 });
 
-// Paper sits BEHIND and ABOVE the typewriter, bottom edge anchored
-// just above the typewriter body so it appears to be emerging from
-// the platen. z is well behind so the typewriter occludes anything
-// the paper would otherwise show through the open type-bar region.
-const paperWorldHeight = 1.0;
-const paperWorldWidth = paperWorldHeight * (PAPER_WIDTH_PX / PAPER_HEIGHT_PX);
+// Paper is BIG — takes about as much space as the typewriter.
+// Extends both above and below so it visually feeds through the platen.
+const paperWorldHeight = 2.6;
+const paperWorldWidth = paperWorldHeight * (PAPER_WIDTH_PX / PAPER_HEIGHT_PX) * 0.85;
 const paperPlane = new THREE.Mesh(
   new THREE.PlaneGeometry(paperWorldWidth, paperWorldHeight),
   paperMaterial
 );
-paperPlane.position.set(0, 1.55, -0.4);
-paperPlane.rotation.x = -0.06;
+paperPlane.position.set(0, 1.15, -0.05);
+paperPlane.rotation.x = -0.04;
 scene.add(paperPlane);
-
-// Subtle shadow plane below the paper to anchor it to the typewriter
-// (kills the "floating" look without needing accurate geometry).
-const shadowMat = new THREE.MeshBasicMaterial({
-  color: 0x000000, transparent: true, opacity: 0.35, depthWrite: false,
-});
-const paperShadow = new THREE.Mesh(new THREE.PlaneGeometry(paperWorldWidth * 1.05, 0.15), shadowMat);
-paperShadow.position.set(0, 1.06, -0.38);
-paperShadow.rotation.x = -Math.PI / 2 + 0.4;
-scene.add(paperShadow);
 
 // =============================================================
 // Text engine — buffer + repaint approach (immediate mode).
@@ -208,10 +196,14 @@ function wordWrap(text, maxWidth) {
   return lines;
 }
 
-// Type line is just above the bottom margin — this is where the
-// active typing happens (the simulated platen position).
-// Latest line always sits here; earlier lines stack upward.
-const TYPE_LINE_Y = PAPER_HEIGHT_PX - MARGIN_Y - LINE_HEIGHT;
+// Text origin: top of the visible paper area.
+// Text grows DOWNWARD as new lines come in. When the text overflows
+// the visible region, scroll so the latest line stays visible at the
+// bottom — like a real typewriter feeding the paper up through the platen.
+// (Empirical UV note: high canvas Y maps to LOW world Y on the plane,
+//  so "top of paper visually" = LOW canvas Y.)
+const TOP_TEXT_Y = MARGIN_Y;
+const VISIBLE_LINES = Math.floor((PAPER_HEIGHT_PX - 2 * MARGIN_Y) / LINE_HEIGHT);
 
 function repaintPaper() {
   paintPaperBackground();
@@ -220,14 +212,10 @@ function repaintPaper() {
   pctx.textBaseline = 'top';
 
   const lines = wordWrap(textBuffer, MAX_TEXT_WIDTH);
+  const startLine = Math.max(0, lines.length - VISIBLE_LINES);
 
-  // Anchor to TYPE_LINE_Y — the LAST line sits there, earlier lines above.
-  // As text accumulates, earlier lines drift upward; lines that go above
-  // MARGIN_Y are clipped (paper-fed-out-the-top illusion).
-  for (let i = 0; i < lines.length; i++) {
-    const y = TYPE_LINE_Y - (lines.length - 1 - i) * LINE_HEIGHT;
-    if (y < MARGIN_Y - LINE_HEIGHT) continue;       // above visible area
-    if (y > PAPER_HEIGHT_PX - MARGIN_Y) break;      // shouldn't happen
+  for (let i = startLine; i < lines.length; i++) {
+    const y = TOP_TEXT_Y + (i - startLine) * LINE_HEIGHT;
     pctx.fillText(lines[i], MARGIN_X, y);
   }
 
@@ -292,10 +280,10 @@ function loadTypewriter() {
       (gltf) => {
         typewriterRoot = gltf.scene;
 
-        // Auto-fit: scale to fit ~2 world units wide
+        // Auto-fit: typewriter slightly smaller than the paper now
         const box = new THREE.Box3().setFromObject(typewriterRoot);
         const size = box.getSize(new THREE.Vector3());
-        const targetWidth = 2.6;
+        const targetWidth = 2.0;
         const scale = targetWidth / size.x;
         typewriterRoot.scale.setScalar(scale);
 
@@ -417,19 +405,8 @@ function pressKey(char) {
         });
       },
     });
-  } else if (carriageRoot && window.gsap) {
-    // Fallback when keys aren't rigged (Underwood scan = fused geometry):
-    // small positional drop only — no rotation. Plus the ripple overlay
-    // gives per-character spatial feedback at the key position.
-    const basePosY = carriageRoot.userData._restY ?? carriageRoot.position.y;
-    if (carriageRoot.userData._restY === undefined) carriageRoot.userData._restY = basePosY;
-
-    window.gsap.timeline({ overwrite: 'auto' })
-      .to(carriageRoot.position, { y: basePosY - 0.005, duration: 0.04, ease: 'power2.in' })
-      .to(carriageRoot.position, { y: basePosY, duration: 0.12, ease: 'power2.out' });
   }
-
-  // Per-character key-position ripple (works regardless of GLB rigging)
+  // No typewriter shake — only the per-key ripple gives visual feedback.
   flashKey(lower);
 }
 
@@ -437,13 +414,13 @@ function pressKey(char) {
 // Typing engine — variable pacing
 // =============================================================
 function delayForChar(c, isShortWord) {
-  if (c === '\n') return 600;
-  if (c === '.') return 400;
-  if (c === '?' || c === '!') return 380;
-  if (c === ',' || c === ';' || c === ':') return 220;
-  if (c === ' ') return 80;
-  // Default 50-90ms jitter, multiplied by 0.6 if inside a fast word
-  const base = 50 + Math.random() * 40;
+  // Reading-pace, not typing-pace: ~25ms/char ≈ 240 wpm comfortable read.
+  if (c === '\n') return 280;
+  if (c === '.') return 180;
+  if (c === '?' || c === '!') return 160;
+  if (c === ',' || c === ';' || c === ':') return 90;
+  if (c === ' ') return 30;
+  const base = 18 + Math.random() * 20; // 18-38ms
   return Math.round(isShortWord ? base * 0.6 : base);
 }
 
@@ -503,12 +480,13 @@ function showPolaroid(p) {
   const el = document.createElement('div');
   el.className = 'polaroid';
 
-  // Layout: spread across 80% of viewport width, just below the typewriter.
-  // 5 slots, alternating slight Y offset so they look hand-placed.
-  const slots = 5;
-  const slot = polaroidIndex % slots;
-  const xPct = 0.12 + (slot / (slots - 1)) * 0.76;
-  const yPct = 0.92 + (slot % 2 === 0 ? -0.02 : 0.02);
+  // Polaroids appear ON the paper itself — overlapping the visible
+  // paper area (upper portion of viewport). Each new polaroid lands
+  // alternating left/right of center near the just-typed paragraph.
+  const isLeft = polaroidIndex % 2 === 0;
+  const xPct = isLeft ? 0.30 : 0.70;
+  // Stack vertically downward as more accumulate (within paper area)
+  const yPct = 0.18 + (Math.floor(polaroidIndex / 2)) * 0.12;
   el.style.left = `${xPct * 100}vw`;
   el.style.top = `${yPct * 100}vh`;
 
