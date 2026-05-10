@@ -80,9 +80,23 @@ function getTypewriterScreenBounds() {
   return { left: minX, top: minY, width: maxX - minX, height: maxY - minY };
 }
 
+// Calibrated key positions (from /?calibrate=1) override the defaults.
+function loadKeyCalibration() {
+  try {
+    const raw = localStorage.getItem('keyCalibration');
+    if (raw) return JSON.parse(raw);
+  } catch {}
+  return null;
+}
+let _calibratedPositions = loadKeyCalibration();
+
+function getKeyPct(c) {
+  return (_calibratedPositions && _calibratedPositions[c]) || KEY_TYPEWRITER_PCT[c];
+}
+
 function flashKey(c) {
   const lower = String(c).toLowerCase();
-  const pct = KEY_TYPEWRITER_PCT[lower];
+  const pct = getKeyPct(lower);
   if (!pct) return;
   const b = getTypewriterScreenBounds();
   if (!b) return;
@@ -618,6 +632,113 @@ async function showDoodle(d) {
 // =============================================================
 const isTestMode = new URLSearchParams(location.search).has('test')
   || location.pathname.startsWith('/test');
+const isCalibrate = new URLSearchParams(location.search).has('calibrate')
+  || location.pathname.startsWith('/calibrate');
+
+// Order in which calibration prompts each key
+const CALIBRATE_KEYS = [
+  'q','w','e','r','t','y','u','i','o','p',
+  'a','s','d','f','g','h','j','k','l',
+  'z','x','c','v','b','n','m',
+  ',','.',' ',
+];
+
+function startCalibration() {
+  const ui = document.createElement('div');
+  ui.id = 'calibrate-ui';
+  ui.innerHTML = `
+    <div class="cal-prompt">
+      <div class="cal-line">Click on the <span id="cal-key">Q</span> key</div>
+      <div class="cal-progress"><span id="cal-done">0</span> / ${CALIBRATE_KEYS.length}</div>
+    </div>
+    <button id="cal-skip" class="cal-btn">Skip this key</button>
+    <button id="cal-undo" class="cal-btn">Undo last</button>
+    <div id="cal-output" class="cal-output hidden"></div>
+  `;
+  document.body.appendChild(ui);
+
+  let idx = 0;
+  const captured = {};
+  const order = [];
+
+  function update() {
+    if (idx >= CALIBRATE_KEYS.length) {
+      const code = formatCalibrateOutput(captured);
+      const out = document.getElementById('cal-output');
+      out.innerHTML = `
+        <div class="cal-line">Calibration complete (${Object.keys(captured).length} keys).</div>
+        <textarea readonly>${code}</textarea>
+        <div class="cal-actions">
+          <button id="cal-save" class="cal-btn primary">Save & apply</button>
+          <button id="cal-restart" class="cal-btn">Restart</button>
+        </div>
+      `;
+      out.classList.remove('hidden');
+      document.querySelector('.cal-prompt').style.display = 'none';
+      document.getElementById('cal-skip').style.display = 'none';
+      document.getElementById('cal-undo').style.display = 'none';
+      document.getElementById('cal-save').addEventListener('click', () => {
+        localStorage.setItem('keyCalibration', JSON.stringify(captured));
+        location.href = '/';
+      });
+      document.getElementById('cal-restart').addEventListener('click', () => location.reload());
+      return;
+    }
+    document.getElementById('cal-key').textContent =
+      CALIBRATE_KEYS[idx] === ' ' ? '␣ (spacebar)' : CALIBRATE_KEYS[idx].toUpperCase();
+    document.getElementById('cal-done').textContent = idx;
+  }
+  update();
+
+  function captureClick(e) {
+    if (idx >= CALIBRATE_KEYS.length) return;
+    // Ignore clicks on the UI itself
+    if (e.target.closest('#calibrate-ui')) return;
+    const b = getTypewriterScreenBounds();
+    if (!b) return;
+    const pctX = (e.clientX - b.left) / b.width;
+    const pctY = (e.clientY - b.top) / b.height;
+    const key = CALIBRATE_KEYS[idx];
+    captured[key] = [+pctX.toFixed(3), +pctY.toFixed(3)];
+    order.push(key);
+    // Show a pulse where they clicked (so they see what was captured)
+    const layer = document.getElementById('key-overlay');
+    if (layer) {
+      const dot = document.createElement('div');
+      dot.className = 'key-pulse';
+      dot.style.left = `${e.clientX}px`;
+      dot.style.top = `${e.clientY}px`;
+      layer.appendChild(dot);
+      setTimeout(() => dot.remove(), 380);
+    }
+    idx++;
+    update();
+  }
+  document.addEventListener('click', captureClick);
+
+  document.getElementById('cal-skip').addEventListener('click', () => {
+    if (idx >= CALIBRATE_KEYS.length) return;
+    idx++;
+    update();
+  });
+  document.getElementById('cal-undo').addEventListener('click', () => {
+    if (order.length === 0) return;
+    const last = order.pop();
+    delete captured[last];
+    idx--;
+    update();
+  });
+}
+
+function formatCalibrateOutput(captured) {
+  const lines = [];
+  for (const key of CALIBRATE_KEYS) {
+    if (!captured[key]) continue;
+    const k = key === ' ' ? "' '" : `'${key}'`;
+    lines.push(`  ${k}: [${captured[key][0]}, ${captured[key][1]}],`);
+  }
+  return 'const KEY_TYPEWRITER_PCT = {\n' + lines.join('\n') + '\n};';
+}
 
 function skipToEnd() {
   for (const s of scenes) {
@@ -918,8 +1039,13 @@ async function boot() {
   clickBuffer = click;
   dingBuffer = ding;
 
-  // Hide loading overlay, show start button
   document.getElementById('loading').classList.add('gone');
+
+  if (isCalibrate) {
+    startCalibration();
+    return;
+  }
+
   document.getElementById('start-overlay').classList.remove('hidden');
 
   document.getElementById('start-button').addEventListener('click', async () => {
