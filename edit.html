@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Edit Letter — For Mom</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Special+Elite&family=Caveat:wght@400;600&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="edit.css">
+</head>
+<body>
+  <header class="topbar">
+    <h1>Edit your letter</h1>
+    <div class="actions">
+      <span id="saved-indicator" class="saved-indicator">Auto-saving</span>
+      <button id="add-scene" class="btn-secondary">+ Add paragraph</button>
+      <button id="export" class="btn-secondary">Export letter.js</button>
+      <button id="preview" class="btn-primary">Preview →</button>
+    </div>
+  </header>
+
+  <main id="scenes"></main>
+
+  <aside id="export-panel" class="hidden">
+    <header>
+      <h2>Copy this into <code>letter.js</code></h2>
+      <button id="close-export">×</button>
+    </header>
+    <textarea id="export-text" readonly></textarea>
+    <button id="copy-export" class="btn-primary">Copy to clipboard</button>
+  </aside>
+
+  <div id="toast" class="hidden"></div>
+
+  <script type="module" src="edit.js"></script>
+</body>
+</html>

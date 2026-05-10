@@ -108,13 +108,14 @@ html, body {
 .doodle circle,
 .doodle polyline {
   fill: none;
-  stroke: #2a1f15;
-  stroke-width: 2.5;
+  stroke: #d4b896;
+  stroke-width: 3;
   stroke-linecap: round;
   stroke-linejoin: round;
   stroke-dasharray: 1000;
   stroke-dashoffset: 1000;
   transition: stroke-dashoffset 1.8s ease-out;
+  filter: drop-shadow(0 0 4px rgba(212, 184, 150, 0.3));
 }
 
 .doodle.draw path,

@@ -4,7 +4,22 @@
 
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
-import { scenes, FAST_WORDS } from './letter.js';
+import { scenes as defaultScenes, FAST_WORDS } from './letter.js';
+
+// Prefer scenes from /edit.html (localStorage) over the placeholder in letter.js.
+function loadScenes() {
+  try {
+    const raw = localStorage.getItem('letterScenes');
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+    }
+  } catch (e) {
+    console.warn('localStorage scenes unreadable, using letter.js defaults', e);
+  }
+  return defaultScenes;
+}
+const scenes = loadScenes();
 
 // =============================================================
 // KEYMAP: populated AFTER first load by inspecting console output.
@@ -112,16 +127,17 @@ const paperMaterial = new THREE.MeshStandardMaterial({
   side: THREE.DoubleSide,
 });
 
-// Aspect ratio matches PX dimensions for crisp text
-const paperWorldHeight = 1.6;
+// Paper sits ENTIRELY above the typing bar — bottom edge just above platen.
+// Text always renders at the bottom of the canvas, so the most-recent line
+// appears just above the typewriter body; earlier lines stack upward.
+const paperWorldHeight = 1.1;
 const paperWorldWidth = paperWorldHeight * (PAPER_WIDTH_PX / PAPER_HEIGHT_PX);
 const paperPlane = new THREE.Mesh(
   new THREE.PlaneGeometry(paperWorldWidth, paperWorldHeight),
   paperMaterial
 );
-// Position above where the typewriter platen would be, slightly tilted back
-paperPlane.position.set(0, 1.05, -0.15);
-paperPlane.rotation.x = -0.18;
+paperPlane.position.set(0, 1.7, -0.1);
+paperPlane.rotation.x = -0.05;
 scene.add(paperPlane);
 
 // =============================================================
@@ -153,6 +169,11 @@ function wordWrap(text, maxWidth) {
   return lines;
 }
 
+// Type line is just above the bottom margin — this is where the
+// active typing happens (the simulated platen position).
+// Latest line always sits here; earlier lines stack upward.
+const TYPE_LINE_Y = PAPER_HEIGHT_PX - MARGIN_Y - LINE_HEIGHT;
+
 function repaintPaper() {
   paintPaperBackground();
   pctx.font = `${FONT_SIZE}px "Special Elite", monospace`;
@@ -160,16 +181,14 @@ function repaintPaper() {
   pctx.textBaseline = 'top';
 
   const lines = wordWrap(textBuffer, MAX_TEXT_WIDTH);
-  const totalHeight = lines.length * LINE_HEIGHT;
-  const visibleHeight = PAPER_HEIGHT_PX - MARGIN_Y * 2;
-  const scrollY = Math.max(0, totalHeight - visibleHeight);
 
+  // Anchor to TYPE_LINE_Y — the LAST line sits there, earlier lines above.
+  // As text accumulates, earlier lines drift upward; lines that go above
+  // MARGIN_Y are clipped (paper-fed-out-the-top illusion).
   for (let i = 0; i < lines.length; i++) {
-    const y = MARGIN_Y + i * LINE_HEIGHT - scrollY;
-    if (y < MARGIN_Y - LINE_HEIGHT) continue;
-    if (y > PAPER_HEIGHT_PX - MARGIN_Y) break;
-    // Slight horizontal jitter per character would be nice but expensive.
-    // Render as a single fillText per line for v1.
+    const y = TYPE_LINE_Y - (lines.length - 1 - i) * LINE_HEIGHT;
+    if (y < MARGIN_Y - LINE_HEIGHT) continue;       // above visible area
+    if (y > PAPER_HEIGHT_PX - MARGIN_Y) break;      // shouldn't happen
     pctx.fillText(lines[i], MARGIN_X, y);
   }
 
@@ -246,8 +265,10 @@ function loadTypewriter() {
 
         scene.add(typewriterRoot);
 
+        // Expose for debugging — window.tw.scene, window.tw.nodes
+        window.tw = { root: typewriterRoot, scene, camera };
+
         // === INTROSPECT: log every node so Hudson can build KEYMAP ===
-        console.group('=== GLB NODE INVENTORY (use to build KEYMAP) ===');
         const nodes = [];
         typewriterRoot.traverse((node) => {
           if (node.name) {
@@ -261,9 +282,10 @@ function loadTypewriter() {
             });
           }
         });
-        console.table(nodes);
-        console.log('Copy candidate key names into KEYMAP at top of card.js.');
-        console.groupEnd();
+        window.tw.nodes = nodes;
+        console.log(`=== GLB NODE INVENTORY: ${nodes.length} named nodes ===`);
+        console.log('window.tw.nodes for full table; window.tw.root for THREE object');
+        console.table(nodes.slice(0, 30));
 
         // Resolve KEYMAP entries to actual nodes
         for (const [char, nodeName] of Object.entries(KEYMAP)) {
@@ -357,16 +379,21 @@ function pressKey(char) {
       },
     });
   } else if (carriageRoot && window.gsap) {
-    // Fallback: tiny carriage shake for thunk feel
-    const baseRot = carriageRoot.rotation.z;
-    const jitter = (Math.random() - 0.5) * 0.004;
-    window.gsap.to(carriageRoot.rotation, {
-      z: baseRot + jitter,
-      duration: 0.04,
-      yoyo: true,
-      repeat: 1,
-      ease: 'power1.inOut',
-    });
+    // Fallback when keys aren't rigged (e.g. photogrammetry scans):
+    // pronounced positional + rotational thump so each keystroke registers visually.
+    const basePosY = carriageRoot.userData._restY ?? carriageRoot.position.y;
+    if (carriageRoot.userData._restY === undefined) carriageRoot.userData._restY = basePosY;
+    const baseRotZ = carriageRoot.userData._restRotZ ?? carriageRoot.rotation.z;
+    if (carriageRoot.userData._restRotZ === undefined) carriageRoot.userData._restRotZ = baseRotZ;
+
+    const dropY = 0.012 + Math.random() * 0.006;
+    const tiltZ = (Math.random() - 0.5) * 0.012;
+
+    window.gsap.timeline({ overwrite: 'auto' })
+      .to(carriageRoot.position, { y: basePosY - dropY, duration: 0.035, ease: 'power2.in' })
+      .to(carriageRoot.rotation, { z: baseRotZ + tiltZ, duration: 0.035, ease: 'power1.in' }, '<')
+      .to(carriageRoot.position, { y: basePosY, duration: 0.18, ease: 'elastic.out(1, 0.4)' })
+      .to(carriageRoot.rotation, { z: baseRotZ, duration: 0.18, ease: 'elastic.out(1, 0.4)' }, '<');
   }
 }
 
