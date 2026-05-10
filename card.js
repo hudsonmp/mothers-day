@@ -448,16 +448,25 @@ function loadScroll() {
         scrollRoot.visible = false;
         scene.add(scrollRoot);
 
-        // Apply saved crop if present
+        // Apply saved transform FIRST (so world-space crop bounds line up)
+        try {
+          const t = JSON.parse(localStorage.getItem('scrollTransform') || 'null');
+          if (t) {
+            scrollRoot.rotation.set(t.rx, t.ry, t.rz);
+            scrollRoot.position.set(t.px, t.py, t.pz);
+            scrollRoot.scale.set(t.sx, t.sy, t.sz);
+          } else {
+            // Backwards compat: old rotation-only key
+            const r = JSON.parse(localStorage.getItem('scrollRotation') || 'null');
+            if (r) scrollRoot.rotation.set(r.x, r.y, r.z);
+          }
+        } catch {}
+
+        // Then apply saved crop
         const savedCrop = loadScrollCrop();
         if (savedCrop && savedCrop.length === 2) {
           applyScrollCrop(savedCrop[0], savedCrop[1]);
         }
-        // Apply saved rotation if present (from /scroll-cal)
-        try {
-          const r = JSON.parse(localStorage.getItem('scrollRotation') || 'null');
-          if (r) scrollRoot.rotation.set(r.x, r.y, r.z);
-        } catch {}
 
         // Expose for debugging
         window.scrollDebug = { root: scrollRoot, open: scrollOpenMesh, closed: scrollClosedMeshes, meshes };
@@ -1055,15 +1064,18 @@ function startScrollCalibration() {
       </div>
     `;
     ui.querySelector('#sc-save').addEventListener('click', () => {
-      // Save: crop world bounds (already applied), text region, scroll rotation
       const tl = screenToWorldOnScroll(cropBoxScreen.x, cropBoxScreen.y);
       const br = screenToWorldOnScroll(cropBoxScreen.x + cropBoxScreen.w, cropBoxScreen.y + cropBoxScreen.h);
       localStorage.setItem('scrollCrop', JSON.stringify([
         [tl.x, tl.y, tl.z], [br.x, br.y, br.z],
       ]));
       localStorage.setItem('scrollTextRegion', JSON.stringify(textRegionPct));
-      localStorage.setItem('scrollRotation', JSON.stringify({
-        x: scrollRoot.rotation.x, y: scrollRoot.rotation.y, z: scrollRoot.rotation.z,
+      // Save FULL transform — clip bounds are world-space, so the scroll
+      // must come back to the exact same position/scale/rotation
+      localStorage.setItem('scrollTransform', JSON.stringify({
+        rx: scrollRoot.rotation.x, ry: scrollRoot.rotation.y, rz: scrollRoot.rotation.z,
+        px: scrollRoot.position.x, py: scrollRoot.position.y, pz: scrollRoot.position.z,
+        sx: scrollRoot.scale.x,    sy: scrollRoot.scale.y,    sz: scrollRoot.scale.z,
       }));
       location.href = '/';
     });
@@ -1072,6 +1084,7 @@ function startScrollCalibration() {
       localStorage.removeItem('scrollCrop');
       localStorage.removeItem('scrollTextRegion');
       localStorage.removeItem('scrollRotation');
+      localStorage.removeItem('scrollTransform');
       location.href = '/';
     });
   }
