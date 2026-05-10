@@ -672,10 +672,11 @@ const calibrateOnlyKey = (_calibrateParam && _calibrateParam !== '1' && _calibra
 
 // Order in which calibration prompts each key
 const CALIBRATE_KEYS = [
+  '1','2','3','4','5','6','7','8','9','0',
   'q','w','e','r','t','y','u','i','o','p',
   'a','s','d','f','g','h','j','k','l',
   'z','x','c','v','b','n','m',
-  ',','.',' ','newline',
+  ',','.',' ','newline','backspace',
 ];
 
 function startCalibration(onlyKey = null) {
@@ -703,6 +704,7 @@ function startCalibration(onlyKey = null) {
   function keyLabel(k) {
     if (k === ' ') return '␣ (spacebar)';
     if (k === 'newline') return '⏎ (Return / carriage return lever)';
+    if (k === 'backspace') return '⌫ (Backspace position on typewriter)';
     return k.toUpperCase();
   }
 
@@ -785,7 +787,7 @@ function formatCalibrateOutput(captured) {
     if (!captured[key]) continue;
     let k;
     if (key === ' ') k = "' '";
-    else if (key === 'newline') k = "'newline'";
+    else if (key === 'newline' || key === 'backspace') k = `'${key}'`;
     else k = `'${key}'`;
     lines.push(`  ${k}: [${captured[key][0]}, ${captured[key][1]}],`);
   }
@@ -1058,6 +1060,8 @@ window.addEventListener('keydown', (e) => {
       textBuffer = textBuffer.slice(0, -1);
       scrollOffset = 0;
       repaintPaper();
+      flashKey('backspace');
+      playClick();
     }
     return;
   }
