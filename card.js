@@ -155,10 +155,11 @@ const paperMaterial = new THREE.MeshStandardMaterial({
   side: THREE.DoubleSide,
 });
 
-// Paper is BIG — takes about as much space as the typewriter.
-// Extends both above and below so it visually feeds through the platen.
+// Paper extends above and below typewriter so the bottom looks like
+// it has been fed through. Aspect ratio matches the canvas exactly so
+// text doesn't get horizontally squished.
 const paperWorldHeight = 2.6;
-const paperWorldWidth = paperWorldHeight * (PAPER_WIDTH_PX / PAPER_HEIGHT_PX) * 0.85;
+const paperWorldWidth = paperWorldHeight * (PAPER_WIDTH_PX / PAPER_HEIGHT_PX);
 const paperPlane = new THREE.Mesh(
   new THREE.PlaneGeometry(paperWorldWidth, paperWorldHeight),
   paperMaterial
@@ -196,14 +197,12 @@ function wordWrap(text, maxWidth) {
   return lines;
 }
 
-// Text origin: top of the visible paper area.
-// Text grows DOWNWARD as new lines come in. When the text overflows
-// the visible region, scroll so the latest line stays visible at the
-// bottom — like a real typewriter feeding the paper up through the platen.
-// (Empirical UV note: high canvas Y maps to LOW world Y on the plane,
-//  so "top of paper visually" = LOW canvas Y.)
-const TOP_TEXT_Y = MARGIN_Y;
-const VISIBLE_LINES = Math.floor((PAPER_HEIGHT_PX - 2 * MARGIN_Y) / LINE_HEIGHT);
+// TYPE_LINE_Y: middle-ish of canvas → middle of viewport in world Y →
+// just above the typing bar. Latest line lands HERE. Older lines stack
+// ABOVE in canvas (smaller Y), which maps to HIGHER in viewport.
+// When older lines exceed top margin, they're clipped off (scrolled out).
+const TYPE_LINE_Y = Math.round(PAPER_HEIGHT_PX * 0.55);
+let _lastNewlineCount = 0;
 
 function repaintPaper() {
   paintPaperBackground();
@@ -212,14 +211,28 @@ function repaintPaper() {
   pctx.textBaseline = 'top';
 
   const lines = wordWrap(textBuffer, MAX_TEXT_WIDTH);
-  const startLine = Math.max(0, lines.length - VISIBLE_LINES);
-
-  for (let i = startLine; i < lines.length; i++) {
-    const y = TOP_TEXT_Y + (i - startLine) * LINE_HEIGHT;
+  // Render so the LAST line sits at TYPE_LINE_Y. Earlier lines stack
+  // upward (smaller canvas Y → higher in viewport). Anything above
+  // the top margin is clipped — that's the "scroll off" effect.
+  for (let i = 0; i < lines.length; i++) {
+    const y = TYPE_LINE_Y - (lines.length - 1 - i) * LINE_HEIGHT;
+    if (y < MARGIN_Y - LINE_HEIGHT) continue;       // clipped (scrolled off top)
+    if (y > TYPE_LINE_Y) break;                      // shouldn't happen
     pctx.fillText(lines[i], MARGIN_X, y);
   }
 
   paperTexture.needsUpdate = true;
+
+  // Brief paper twitch up on each new line — visual carriage advance
+  const newlineCount = (textBuffer.match(/\n/g) || []).length;
+  if (newlineCount > _lastNewlineCount && window.gsap && paperPlane) {
+    _lastNewlineCount = newlineCount;
+    const baseY = paperPlane.userData._restY ?? paperPlane.position.y;
+    if (paperPlane.userData._restY === undefined) paperPlane.userData._restY = baseY;
+    window.gsap.fromTo(paperPlane.position, { y: baseY }, {
+      y: baseY + 0.025, duration: 0.07, yoyo: true, repeat: 1, ease: 'power2.out',
+    });
+  }
 }
 
 // =============================================================
