@@ -956,14 +956,20 @@ async function runPdfTransition() {
   await gsap.to({}, { duration: 0.4 });
 
   // ===========================================================
-  // PHASE 3 — UNFURL: scroll spins, fades, PDF document fades in
+  // PHASE 3 — UNFURL: 3D scroll fades out while a partially-unrolled
+  //           SVG scroll appears, the parchment middle widens with a
+  //           blur that recedes outward, then PDF content fades in.
+  //           The scroll ENDS (rolled cylinders) stay visible.
   // ===========================================================
-  // Scroll rotates and shrinks while a flat PDF document fades into view
   const pdfOverlay = document.createElement('div');
-  pdfOverlay.className = 'pdf-transition';
+  pdfOverlay.className = 'pdf-transition unrolled-mode';
   pdfOverlay.innerHTML = `
-    <div class="pdf-stage unfurled">
-      <div class="pdf-content"></div>
+    <div class="unrolled-scroll">
+      <object class="scroll-svg" type="image/svg+xml" data="assets/scroll-unrolled.svg"></object>
+      <div class="scroll-content-mask">
+        <div class="pdf-content"></div>
+      </div>
+      <div class="scroll-blur"></div>
     </div>
     <div class="pdf-actions">
       <button id="pdf-print-btn">Print / Save as PDF</button>
@@ -971,35 +977,56 @@ async function runPdfTransition() {
     </div>
   `;
   document.body.appendChild(pdfOverlay);
-  const pdfStage = pdfOverlay.querySelector('.pdf-stage');
+
+  const unrolled = pdfOverlay.querySelector('.unrolled-scroll');
+  const contentMask = pdfOverlay.querySelector('.scroll-content-mask');
   const pdfContent = pdfOverlay.querySelector('.pdf-content');
+  const blur = pdfOverlay.querySelector('.scroll-blur');
   const pdfActions = pdfOverlay.querySelector('.pdf-actions');
 
   buildPdfContent(pdfContent);
 
+  // Initial state: middle clip-path closed at center, full blur, content hidden
   gsap.set(pdfOverlay, { opacity: 0 });
-  gsap.set(pdfStage, { scaleX: 0.04, scaleY: 1.05, transformOrigin: 'center center' });
+  gsap.set(contentMask, { clipPath: 'inset(0 50% 0 50%)', opacity: 0 });
+  gsap.set(blur, { opacity: 1 });
   gsap.set(pdfActions, { opacity: 0, y: 20 });
 
+  // Cross-fade: 3D scroll out, SVG unrolled in
   await gsap.timeline()
-    // Scroll spins + fades while overlay appears (cross-fade)
-    .to(scrollRoot.rotation, { y: Math.PI * 1.5, duration: 1.2, ease: 'power2.inOut' }, 0)
-    .to(scrollRoot.scale, { x: scrollRoot.scale.x * 0.4, y: scrollRoot.scale.y * 0.4, z: scrollRoot.scale.z * 0.4, duration: 1.2, ease: 'power2.in' }, 0)
+    .to(scrollRoot.rotation, { y: Math.PI * 0.5, duration: 0.9, ease: 'power2.inOut' }, 0)
     .to({}, {
-      duration: 1.2,
+      duration: 0.9,
       onUpdate: function() {
         const o = 1 - this.progress();
         scrollRoot.traverse(n => { if (n.material) n.material.opacity = o; });
       },
     }, 0)
-    .to(pdfOverlay, { opacity: 1, duration: 0.6, ease: 'power2.out' }, 0.4)
-    // Unfurl: scroll reveals as flat document
-    .to(pdfStage, { scaleX: 1, scaleY: 1, duration: 1.4, ease: 'power3.out' }, 0.7)
-    .to(pdfActions, { opacity: 1, y: 0, duration: 0.4, ease: 'power2.out' }, '-=0.3')
-    .then(() => {});
+    .to(pdfOverlay, { opacity: 1, duration: 0.5, ease: 'power2.out' }, 0.3)
+    .then(() => { scrollRoot.visible = false; });
 
-  // Hide scroll after transition
-  scrollRoot.visible = false;
+  // Unroll: clip-path opens left+right from center, blur recedes outward,
+  // PDF content fades in mid-way through.
+  await gsap.timeline()
+    .to(contentMask, { opacity: 1, duration: 0.3, ease: 'power2.out' }, 0)
+    .to(contentMask, {
+      clipPath: 'inset(0 0% 0 0%)',
+      duration: 1.6,
+      ease: 'power2.out',
+    }, 0.05)
+    // Blur ring shrinks from full (covering center) down to nothing
+    .to(blur, {
+      duration: 1.6,
+      ease: 'power2.out',
+      onUpdate: function() {
+        // 0 = no blur visible, 1 = full blur covers everything
+        const p = 1 - this.progress();
+        // Width grows then shrinks the blur band; opacity fades
+        blur.style.opacity = String(p * 0.6);
+        blur.style.transform = `translateX(-50%) scaleX(${0.05 + p * 0.95})`;
+      },
+    }, 0.05)
+    .to(pdfActions, { opacity: 1, y: 0, duration: 0.4, ease: 'power2.out' }, '-=0.3');
 
   // ===========================================================
   // Wire up the print + close buttons
