@@ -867,98 +867,180 @@ function buildPdfContent(container) {
   }
 }
 
+// Sound: ribbon tying — soft cloth swish (synthesized)
+function playRibbon() {
+  if (!audioCtx) return;
+  const dur = 0.5;
+  const sampleRate = audioCtx.sampleRate;
+  const buf = audioCtx.createBuffer(1, dur * sampleRate, sampleRate);
+  const data = buf.getChannelData(0);
+  for (let i = 0; i < data.length; i++) {
+    const t = i / data.length;
+    // Pink-ish noise with smooth bell envelope
+    data[i] = (Math.random() * 2 - 1) * Math.sin(t * Math.PI) * 0.6;
+  }
+  const src = audioCtx.createBufferSource();
+  src.buffer = buf;
+  const filter = audioCtx.createBiquadFilter();
+  filter.type = 'lowpass';
+  filter.frequency.value = 2200;
+  const gain = audioCtx.createGain();
+  gain.gain.value = 0.18;
+  src.connect(filter).connect(gain).connect(audioCtx.destination);
+  src.start();
+}
+
 async function runPdfTransition() {
   if (!window.gsap) return;
+  if (!scrollRoot) {
+    // No scroll asset — fall back to opening the print page directly
+    console.warn('No scroll model loaded; opening print view directly');
+    window.open('letter-print.html', '_blank');
+    return;
+  }
 
-  // Snapshot the current paper canvas (with all typed text + fold gradient)
-  const snap = document.createElement('canvas');
-  snap.width = paperCanvas.width;
-  snap.height = paperCanvas.height;
-  snap.getContext('2d').drawImage(paperCanvas, 0, 0);
-  const dataUrl = snap.toDataURL('image/png');
+  // ===========================================================
+  // PHASE 1 — RIP: paper plane shakes + jolts up, scene dims
+  // ===========================================================
+  playRip();
 
-  // Build the overlay
-  const overlay = document.createElement('div');
-  overlay.className = 'pdf-transition';
-  overlay.innerHTML = `
-    <div class="pdf-stage">
-      <div class="pdf-tear"></div>
-      <img class="pdf-image" src="${dataUrl}" alt="" />
+  const paperBaseY = paperPlane.userData._restY ?? paperPlane.position.y;
+  if (paperPlane.userData._restY === undefined) paperPlane.userData._restY = paperBaseY;
+
+  await gsap.timeline()
+    .to(paperPlane.position, {
+      keyframes: [
+        { x: -0.04, duration: 0.05 },
+        { x:  0.04, duration: 0.05 },
+        { x: -0.03, duration: 0.05 },
+        { x:  0.03, duration: 0.05 },
+        { x:  0,    duration: 0.06 },
+      ],
+      ease: 'power1.inOut',
+    }, 0)
+    .to(paperPlane.position, { y: paperBaseY + 0.6, duration: 0.4, ease: 'power3.in' }, 0.2)
+    .to(paperPlane.material, { opacity: 0, duration: 0.3, ease: 'power1.in' }, 0.5)
+    .set(paperPlane, { visible: false }, '+=0')
+    .then(() => {});
+
+  // Ensure material is transparent for fade
+  paperPlane.material.transparent = true;
+
+  // ===========================================================
+  // PHASE 2 — SCROLL APPEARS: scroll model fades in centered
+  // ===========================================================
+  scrollRoot.visible = true;
+  scrollRoot.position.set(0, 0.6, 0.3);
+  scrollRoot.rotation.set(0, 0, 0);
+  scrollRoot.scale.setScalar(scrollRoot.userData._restScale ?? scrollRoot.scale.x);
+  if (scrollRoot.userData._restScale === undefined) {
+    scrollRoot.userData._restScale = scrollRoot.scale.x;
+  }
+  // Make scroll fadeable
+  scrollRoot.traverse(n => {
+    if (n.material) {
+      n.material.transparent = true;
+      n.material.opacity = 0;
+    }
+  });
+
+  await gsap.timeline()
+    .to(scrollRoot.position, { y: 1.0, duration: 0.7, ease: 'power2.out' }, 0)
+    .to({}, {
+      duration: 0.7,
+      onUpdate: function() {
+        const o = this.progress();
+        scrollRoot.traverse(n => { if (n.material) n.material.opacity = o; });
+      },
+    }, 0)
+    .then(() => {});
+
+  // ===========================================================
+  // PHASE 3 — RIBBON TIES: a torus mesh wraps around the scroll
+  // ===========================================================
+  // Build ribbon (red torus around scroll)
+  const sBox = new THREE.Box3().setFromObject(scrollRoot);
+  const sSize = sBox.getSize(new THREE.Vector3());
+  const ribbonRadius = Math.max(sSize.y, sSize.z) * 0.6;
+  const ribbon = new THREE.Mesh(
+    new THREE.TorusGeometry(ribbonRadius, 0.025, 12, 48),
+    new THREE.MeshStandardMaterial({ color: 0x9b2828, roughness: 0.5, transparent: true, opacity: 0 })
+  );
+  // Ribbon wraps around the scroll's long axis (X)
+  ribbon.rotation.y = Math.PI / 2;
+  ribbon.position.copy(scrollRoot.position);
+  scene.add(ribbon);
+
+  playRibbon();
+
+  await gsap.timeline()
+    .to(ribbon.material, { opacity: 1, duration: 0.4, ease: 'power2.out' }, 0)
+    .from(ribbon.scale, { x: 0.01, y: 0.01, z: 0.01, duration: 0.5, ease: 'back.out(1.5)' }, 0)
+    // Tighten / cinch
+    .to(ribbon.scale, { x: 0.95, y: 0.95, z: 0.95, duration: 0.25, ease: 'power2.in' }, 0.5)
+    .then(() => {});
+
+  // Brief hold — the tied scroll
+  await gsap.to({}, { duration: 0.5 });
+
+  // ===========================================================
+  // PHASE 4 — UNTIES: ribbon falls + fades
+  // ===========================================================
+  await gsap.timeline()
+    .to(ribbon.scale, { x: 1.4, y: 1.4, z: 1.4, duration: 0.5, ease: 'power2.in' }, 0)
+    .to(ribbon.position, { y: ribbon.position.y - 0.5, duration: 0.6, ease: 'power2.in' }, 0.1)
+    .to(ribbon.material, { opacity: 0, duration: 0.4, ease: 'power1.in' }, 0.3)
+    .then(() => { scene.remove(ribbon); });
+
+  // ===========================================================
+  // PHASE 5 — UNFURL: scroll spins, fades, PDF document fades in
+  // ===========================================================
+  // Scroll rotates and shrinks while a flat PDF document fades into view
+  const pdfOverlay = document.createElement('div');
+  pdfOverlay.className = 'pdf-transition';
+  pdfOverlay.innerHTML = `
+    <div class="pdf-stage unfurled">
       <div class="pdf-content"></div>
-      <div class="pdf-shine"></div>
     </div>
     <div class="pdf-actions">
       <button id="pdf-print-btn">Print / Save as PDF</button>
       <button id="pdf-back-btn">Back to letter</button>
     </div>
   `;
-  document.body.appendChild(overlay);
+  document.body.appendChild(pdfOverlay);
+  const pdfStage = pdfOverlay.querySelector('.pdf-stage');
+  const pdfContent = pdfOverlay.querySelector('.pdf-content');
+  const pdfActions = pdfOverlay.querySelector('.pdf-actions');
 
-  const stage = overlay.querySelector('.pdf-stage');
-  const img = overlay.querySelector('.pdf-image');
-  const tear = overlay.querySelector('.pdf-tear');
-  const content = overlay.querySelector('.pdf-content');
-  const actions = overlay.querySelector('.pdf-actions');
+  buildPdfContent(pdfContent);
 
-  buildPdfContent(content);
+  gsap.set(pdfOverlay, { opacity: 0 });
+  gsap.set(pdfStage, { scaleX: 0.04, scaleY: 1.05, transformOrigin: 'center center' });
+  gsap.set(pdfActions, { opacity: 0, y: 20 });
 
-  // Initial state — match the on-typewriter look
-  gsap.set(stage, { transformOrigin: 'center center' });
-  gsap.set(content, { opacity: 0, pointerEvents: 'none' });
-  gsap.set(actions, { opacity: 0, y: 20 });
-  gsap.set(tear, { scaleY: 0, transformOrigin: 'top center' });
+  await gsap.timeline()
+    // Scroll spins + fades while overlay appears (cross-fade)
+    .to(scrollRoot.rotation, { y: Math.PI * 1.5, duration: 1.2, ease: 'power2.inOut' }, 0)
+    .to(scrollRoot.scale, { x: scrollRoot.scale.x * 0.4, y: scrollRoot.scale.y * 0.4, z: scrollRoot.scale.z * 0.4, duration: 1.2, ease: 'power2.in' }, 0)
+    .to({}, {
+      duration: 1.2,
+      onUpdate: function() {
+        const o = 1 - this.progress();
+        scrollRoot.traverse(n => { if (n.material) n.material.opacity = o; });
+      },
+    }, 0)
+    .to(pdfOverlay, { opacity: 1, duration: 0.6, ease: 'power2.out' }, 0.4)
+    // Unfurl: scroll reveals as flat document
+    .to(pdfStage, { scaleX: 1, scaleY: 1, duration: 1.4, ease: 'power3.out' }, 0.7)
+    .to(pdfActions, { opacity: 1, y: 0, duration: 0.4, ease: 'power2.out' }, '-=0.3')
+    .then(() => {});
 
-  // Fade overlay in quickly while paper sits at "current" state
-  await gsap.fromTo(overlay, { opacity: 0 }, { opacity: 1, duration: 0.3, ease: 'power2.out' });
+  // Hide scroll after transition
+  scrollRoot.visible = false;
 
-  const tl = gsap.timeline();
-
-  // Phase 1: RIP — shake aggressively, tear line drops down, sound, paper jolts up
-  tl.add(() => playRip());
-  tl.to(stage, {
-    keyframes: [
-      { x: -6, rotate: -0.8, duration: 0.04 },
-      { x:  7, rotate:  0.9, duration: 0.04 },
-      { x: -5, rotate: -0.6, duration: 0.04 },
-      { x:  6, rotate:  0.7, duration: 0.04 },
-      { x: -3, rotate: -0.3, duration: 0.04 },
-      { x:  0, rotate:  0,   duration: 0.05 },
-    ],
-    ease: 'power1.inOut',
-  });
-  tl.to(tear, { scaleY: 1, duration: 0.35, ease: 'power3.out' }, '<');
-  tl.to(stage, { y: -40, duration: 0.55, ease: 'power3.out' }, '<0.15');
-
-  // Phase 2: ROLL into a scroll — width compresses, slight vertical stretch
-  tl.to(stage, {
-    scaleX: 0.05,
-    scaleY: 1.08,
-    duration: 1.5,
-    ease: 'power2.inOut',
-  });
-  tl.to(tear, { opacity: 0, duration: 0.25 }, '<0.2');
-
-  // Pause holding the scroll
-  tl.to({}, { duration: 0.45 });
-
-  // Phase 3: swap — image fades, formatted PDF content fades in (still rolled)
-  tl.to(img, { opacity: 0, duration: 0.2 });
-  tl.set(stage, { className: 'pdf-stage rolled-out' });
-  tl.set(content, { opacity: 1, pointerEvents: 'auto' });
-
-  // Phase 4: UNFURL — scale back to A4-ish proportions, lift to center
-  tl.to(stage, {
-    scaleX: 1,
-    scaleY: 1,
-    y: 0,
-    duration: 1.6,
-    ease: 'power2.out',
-  });
-
-  // Phase 5: settle + reveal actions
-  tl.to(actions, { opacity: 1, y: 0, duration: 0.4, ease: 'power2.out' }, '-=0.3');
-
-  // Wire up actions
+  // ===========================================================
+  // Wire up the print + close buttons
+  // ===========================================================
   document.getElementById('pdf-print-btn').addEventListener('click', () => {
     document.body.classList.add('printing');
     requestAnimationFrame(() => {
@@ -967,8 +1049,14 @@ async function runPdfTransition() {
     });
   });
   document.getElementById('pdf-back-btn').addEventListener('click', () => {
-    gsap.to(overlay, {
-      opacity: 0, duration: 0.4, ease: 'power2.in', onComplete: () => overlay.remove(),
+    gsap.to(pdfOverlay, {
+      opacity: 0, duration: 0.4, ease: 'power2.in', onComplete: () => {
+        pdfOverlay.remove();
+        // Restore typewriter scene state
+        paperPlane.material.opacity = 1;
+        paperPlane.position.y = paperBaseY;
+        paperPlane.visible = true;
+      },
     });
   });
 }
