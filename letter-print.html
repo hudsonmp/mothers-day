@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Letter for Mom</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Special+Elite&family=Caveat:wght@600&display=swap" rel="stylesheet">
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      background: #f4ead4;
+      color: #1f1610;
+      font-family: 'Special Elite', monospace;
+      max-width: 720px;
+      margin: 0 auto;
+      padding: 64px 56px;
+      line-height: 1.7;
+      font-size: 16px;
+    }
+    .paragraph {
+      margin-bottom: 24px;
+      white-space: pre-wrap;
+    }
+    .photo-row {
+      display: flex;
+      gap: 12px;
+      margin: 16px 0 24px;
+      flex-wrap: wrap;
+      page-break-inside: avoid;
+    }
+    .photo {
+      width: 180px;
+      padding: 8px 8px 24px;
+      background: #fff;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+      transform: rotate(var(--tilt));
+    }
+    .photo img {
+      width: 100%;
+      aspect-ratio: 1;
+      object-fit: cover;
+      display: block;
+    }
+    .photo .caption {
+      font-family: 'Caveat', cursive;
+      font-size: 16px;
+      color: #4a3a2a;
+      text-align: center;
+      margin-top: 8px;
+      line-height: 1.1;
+    }
+    @media print {
+      body { padding: 0.6in; }
+      .no-print { display: none; }
+    }
+    .actions {
+      position: fixed;
+      top: 16px;
+      right: 16px;
+      display: flex;
+      gap: 8px;
+    }
+    .actions button {
+      background: #1a1410;
+      color: #f4ead4;
+      border: none;
+      padding: 10px 16px;
+      border-radius: 6px;
+      cursor: pointer;
+      font-family: inherit;
+      font-size: 14px;
+    }
+    .actions button:hover { background: #3a2a1f; }
+  </style>
+</head>
+<body>
+  <div class="actions no-print">
+    <button onclick="window.print()">Print / Save PDF</button>
+    <button onclick="window.close()">Close</button>
+  </div>
+
+  <div id="letter"></div>
+
+  <script type="module">
+    import { scenes as defaultScenes } from './letter.js';
+
+    function loadScenes() {
+      try {
+        const raw = localStorage.getItem('letterScenes');
+        if (raw) {
+          const parsed = JSON.parse(raw);
+          if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+        }
+      } catch {}
+      return defaultScenes;
+    }
+
+    const scenes = loadScenes();
+    const letterEl = document.getElementById('letter');
+    scenes.forEach(scene => {
+      const p = document.createElement('div');
+      p.className = 'paragraph';
+      p.textContent = scene.paragraph || '';
+      letterEl.appendChild(p);
+
+      if (scene.polaroid) {
+        const row = document.createElement('div');
+        row.className = 'photo-row';
+        const ph = document.createElement('div');
+        ph.className = 'photo';
+        ph.style.setProperty('--tilt', `${scene.polaroid.tilt ?? 0}deg`);
+        const img = document.createElement('img');
+        img.src = scene.polaroid.src;
+        img.onerror = () => { img.style.background = '#c9a987'; img.removeAttribute('src'); };
+        ph.appendChild(img);
+        if (scene.polaroid.caption) {
+          const cap = document.createElement('div');
+          cap.className = 'caption';
+          cap.textContent = scene.polaroid.caption;
+          ph.appendChild(cap);
+        }
+        row.appendChild(ph);
+        letterEl.appendChild(row);
+      }
+    });
+
+    // Auto-trigger print dialog after a short pause to let images load
+    setTimeout(() => window.print(), 700);
+  </script>
+</body>
+</html>

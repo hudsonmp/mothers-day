@@ -22,16 +22,44 @@ function loadScenes() {
 const scenes = loadScenes();
 
 // =============================================================
-// KEYMAP: populated AFTER first load by inspecting console output.
-// On boot, every node in the GLB is logged so Hudson can find the
-// key bones/meshes and fill in the map below. Lowercase keys.
-// If a character isn't in the map, the carriage shakes instead.
+// KEYMAP: bone names per character. Underwood scan = fused geometry,
+// so this is empty and we use KEY_POSITIONS overlay for visual feedback.
 // =============================================================
-const KEYMAP = {
-  // 'a': 'Key_A',
-  // 'b': 'Key_B',
-  // ...
+const KEYMAP = {};
+
+// =============================================================
+// KEY_POSITIONS — viewport-percentage coords of each letter key on
+// the rendered Underwood. Used by flashKey() to render a brief pulse
+// at the right key position when that char types.
+// =============================================================
+const KEY_POSITIONS = {
+  'q': {x: 0.295, y: 0.66}, 'w': {x: 0.345, y: 0.66}, 'e': {x: 0.395, y: 0.66},
+  'r': {x: 0.445, y: 0.66}, 't': {x: 0.495, y: 0.66}, 'y': {x: 0.545, y: 0.66},
+  'u': {x: 0.595, y: 0.66}, 'i': {x: 0.645, y: 0.66}, 'o': {x: 0.695, y: 0.66},
+  'p': {x: 0.745, y: 0.66},
+  'a': {x: 0.305, y: 0.74}, 's': {x: 0.355, y: 0.74}, 'd': {x: 0.405, y: 0.74},
+  'f': {x: 0.455, y: 0.74}, 'g': {x: 0.505, y: 0.74}, 'h': {x: 0.555, y: 0.74},
+  'j': {x: 0.605, y: 0.74}, 'k': {x: 0.655, y: 0.74}, 'l': {x: 0.705, y: 0.74},
+  'z': {x: 0.330, y: 0.82}, 'x': {x: 0.380, y: 0.82}, 'c': {x: 0.430, y: 0.82},
+  'v': {x: 0.480, y: 0.82}, 'b': {x: 0.530, y: 0.82}, 'n': {x: 0.580, y: 0.82},
+  'm': {x: 0.630, y: 0.82},
+  ',': {x: 0.680, y: 0.82}, '.': {x: 0.730, y: 0.82},
+  ' ': {x: 0.500, y: 0.88},
 };
+
+function flashKey(c) {
+  const lower = String(c).toLowerCase();
+  const pos = KEY_POSITIONS[lower];
+  if (!pos) return;
+  const layer = document.getElementById('key-overlay');
+  if (!layer) return;
+  const dot = document.createElement('div');
+  dot.className = 'key-pulse';
+  dot.style.left = `${pos.x * 100}vw`;
+  dot.style.top = `${pos.y * 100}vh`;
+  layer.appendChild(dot);
+  setTimeout(() => dot.remove(), 380);
+}
 
 // =============================================================
 // Constants
@@ -127,18 +155,29 @@ const paperMaterial = new THREE.MeshStandardMaterial({
   side: THREE.DoubleSide,
 });
 
-// Paper sits ENTIRELY above the typing bar — bottom edge just above platen.
-// Text always renders at the bottom of the canvas, so the most-recent line
-// appears just above the typewriter body; earlier lines stack upward.
-const paperWorldHeight = 1.1;
+// Paper sits BEHIND and ABOVE the typewriter, bottom edge anchored
+// just above the typewriter body so it appears to be emerging from
+// the platen. z is well behind so the typewriter occludes anything
+// the paper would otherwise show through the open type-bar region.
+const paperWorldHeight = 1.0;
 const paperWorldWidth = paperWorldHeight * (PAPER_WIDTH_PX / PAPER_HEIGHT_PX);
 const paperPlane = new THREE.Mesh(
   new THREE.PlaneGeometry(paperWorldWidth, paperWorldHeight),
   paperMaterial
 );
-paperPlane.position.set(0, 1.7, -0.1);
-paperPlane.rotation.x = -0.05;
+paperPlane.position.set(0, 1.55, -0.4);
+paperPlane.rotation.x = -0.06;
 scene.add(paperPlane);
+
+// Subtle shadow plane below the paper to anchor it to the typewriter
+// (kills the "floating" look without needing accurate geometry).
+const shadowMat = new THREE.MeshBasicMaterial({
+  color: 0x000000, transparent: true, opacity: 0.35, depthWrite: false,
+});
+const paperShadow = new THREE.Mesh(new THREE.PlaneGeometry(paperWorldWidth * 1.05, 0.15), shadowMat);
+paperShadow.position.set(0, 1.06, -0.38);
+paperShadow.rotation.x = -Math.PI / 2 + 0.4;
+scene.add(paperShadow);
 
 // =============================================================
 // Text engine — buffer + repaint approach (immediate mode).
@@ -379,22 +418,19 @@ function pressKey(char) {
       },
     });
   } else if (carriageRoot && window.gsap) {
-    // Fallback when keys aren't rigged (e.g. photogrammetry scans):
-    // pronounced positional + rotational thump so each keystroke registers visually.
+    // Fallback when keys aren't rigged (Underwood scan = fused geometry):
+    // small positional drop only — no rotation. Plus the ripple overlay
+    // gives per-character spatial feedback at the key position.
     const basePosY = carriageRoot.userData._restY ?? carriageRoot.position.y;
     if (carriageRoot.userData._restY === undefined) carriageRoot.userData._restY = basePosY;
-    const baseRotZ = carriageRoot.userData._restRotZ ?? carriageRoot.rotation.z;
-    if (carriageRoot.userData._restRotZ === undefined) carriageRoot.userData._restRotZ = baseRotZ;
-
-    const dropY = 0.012 + Math.random() * 0.006;
-    const tiltZ = (Math.random() - 0.5) * 0.012;
 
     window.gsap.timeline({ overwrite: 'auto' })
-      .to(carriageRoot.position, { y: basePosY - dropY, duration: 0.035, ease: 'power2.in' })
-      .to(carriageRoot.rotation, { z: baseRotZ + tiltZ, duration: 0.035, ease: 'power1.in' }, '<')
-      .to(carriageRoot.position, { y: basePosY, duration: 0.18, ease: 'elastic.out(1, 0.4)' })
-      .to(carriageRoot.rotation, { z: baseRotZ, duration: 0.18, ease: 'elastic.out(1, 0.4)' }, '<');
+      .to(carriageRoot.position, { y: basePosY - 0.005, duration: 0.04, ease: 'power2.in' })
+      .to(carriageRoot.position, { y: basePosY, duration: 0.12, ease: 'power2.out' });
   }
+
+  // Per-character key-position ripple (works regardless of GLB rigging)
+  flashKey(lower);
 }
 
 // =============================================================
@@ -458,18 +494,31 @@ async function typeParagraph(paragraph) {
 // =============================================================
 // Polaroid + doodle reveal
 // =============================================================
+// Scrapbook trail: polaroids accumulate left-to-right across the
+// bottom of the viewport, slightly overlapping with random tilts.
+// Position from scene config is IGNORED — auto-placement only.
+let polaroidIndex = 0;
 function showPolaroid(p) {
   if (!p) return;
   const el = document.createElement('div');
   el.className = 'polaroid';
-  el.style.left = `${p.position.x * 100}vw`;
-  el.style.top = `${p.position.y * 100}vh`;
-  el.style.setProperty('--tilt', `${p.tilt ?? 0}deg`);
+
+  // Layout: spread across 80% of viewport width, just below the typewriter.
+  // 5 slots, alternating slight Y offset so they look hand-placed.
+  const slots = 5;
+  const slot = polaroidIndex % slots;
+  const xPct = 0.12 + (slot / (slots - 1)) * 0.76;
+  const yPct = 0.92 + (slot % 2 === 0 ? -0.02 : 0.02);
+  el.style.left = `${xPct * 100}vw`;
+  el.style.top = `${yPct * 100}vh`;
+
+  // Random tilt per polaroid for hand-placed feel
+  const tilt = (Math.random() - 0.5) * 12;
+  el.style.setProperty('--tilt', `${tilt}deg`);
 
   const img = document.createElement('img');
   img.src = p.src;
   img.onerror = () => {
-    // Placeholder if photo missing
     img.style.background = '#c9a987';
     img.removeAttribute('src');
   };
@@ -483,7 +532,7 @@ function showPolaroid(p) {
   }
 
   document.getElementById('polaroids').appendChild(el);
-  // Trigger entry animation on next frame
+  polaroidIndex++;
   requestAnimationFrame(() => {
     requestAnimationFrame(() => el.classList.add('visible'));
   });
@@ -519,13 +568,24 @@ async function showDoodle(d) {
 // Master sequencer
 // =============================================================
 async function runLetter() {
-  for (const s of scenes) {
+  for (let i = 0; i < scenes.length; i++) {
+    const s = scenes[i];
     if (s.polaroid) showPolaroid(s.polaroid);
     if (s.doodle) showDoodle(s.doodle);
     // Small breath before typing so the polaroid/doodle is visible first
     await sleep(700);
-    await typeParagraph(s.paragraph);
+
+    // Ensure paragraph break BETWEEN scenes — append \n if the
+    // current paragraph doesn't already end with one. This guarantees
+    // visual separation regardless of how the user wrote the text.
+    let para = s.paragraph || '';
+    if (i < scenes.length - 1 && !para.endsWith('\n\n')) {
+      para = para.replace(/\n*$/, '') + '\n\n';
+    }
+    await typeParagraph(para);
   }
+  // Letter complete — reveal the post-letter actions
+  document.getElementById('post-actions')?.classList.add('visible');
 }
 
 // =============================================================
@@ -565,6 +625,26 @@ async function boot() {
     if (audioCtx.state === 'suspended') await audioCtx.resume();
     document.getElementById('start-overlay').classList.add('hidden');
     runLetter();
+  });
+
+  // Fullscreen toggle
+  document.getElementById('fullscreen-btn')?.addEventListener('click', () => {
+    if (!document.fullscreenElement) {
+      document.documentElement.requestFullscreen?.();
+    } else {
+      document.exitFullscreen?.();
+    }
+  });
+
+  // Save as PDF — opens print-friendly view of letter content
+  document.getElementById('save-pdf-btn')?.addEventListener('click', () => {
+    const w = window.open('letter-print.html', '_blank');
+    // letter-print.html auto-triggers print on load
+  });
+
+  // Replay
+  document.getElementById('replay-btn')?.addEventListener('click', () => {
+    window.location.reload();
   });
 }
 
