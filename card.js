@@ -264,20 +264,51 @@ let _lastNewlineCount = 0;
 let scrollOffset = 0;
 let letterCompleted = false;
 
+// Response state — anything typed after the letter completes goes into a
+// SEPARATE buffer, rendered red on paper + in PDF. Persisted under its own
+// localStorage key so the /edit content (`letterScenes`) is never touched.
+let responseBuffer = '';
+let responseVisible = true;
+try {
+  const saved = localStorage.getItem('letterResponse');
+  if (saved !== null) responseBuffer = saved;
+  const vis = localStorage.getItem('letterResponseVisible');
+  if (vis !== null) responseVisible = vis === '1';
+} catch (e) { /* origin-restricted, default empty */ }
+
+function persistResponse() {
+  try {
+    localStorage.setItem('letterResponse', responseBuffer);
+    localStorage.setItem('letterResponseVisible', responseVisible ? '1' : '0');
+  } catch (e) { /* swallow quota / disabled errors */ }
+}
+
 function repaintPaper() {
   paintPaperBackground();
   pctx.font = `${FONT_SIZE}px "Special Elite", monospace`;
-  pctx.fillStyle = '#1f1610';
   pctx.textBaseline = 'top';
 
-  const lines = wordWrap(textBuffer, MAX_TEXT_WIDTH);
+  const letterLines = wordWrap(textBuffer, MAX_TEXT_WIDTH);
+  const showResponse = letterCompleted && responseVisible && responseBuffer.length > 0;
+  const responseLines = showResponse ? wordWrap(responseBuffer, MAX_TEXT_WIDTH) : [];
+  const total = letterLines.length + responseLines.length;
+
   // Render so the LAST line sits at TYPE_LINE_Y, plus scrollOffset
   // (post-letter scrollback). Earlier lines stack upward.
-  for (let i = 0; i < lines.length; i++) {
-    const y = TYPE_LINE_Y - (lines.length - 1 - i) * LINE_HEIGHT + scrollOffset;
+  pctx.fillStyle = '#1f1610';
+  for (let i = 0; i < letterLines.length; i++) {
+    const y = TYPE_LINE_Y - (total - 1 - i) * LINE_HEIGHT + scrollOffset;
     if (y < -LINE_HEIGHT) continue;
     if (y > PAPER_HEIGHT_PX) break;
-    pctx.fillText(lines[i], MARGIN_X, y);
+    pctx.fillText(letterLines[i], MARGIN_X, y);
+  }
+  pctx.fillStyle = '#a51c1c'; // typewriter-ribbon red for the response
+  for (let j = 0; j < responseLines.length; j++) {
+    const idx = letterLines.length + j;
+    const y = TYPE_LINE_Y - (total - 1 - idx) * LINE_HEIGHT + scrollOffset;
+    if (y < -LINE_HEIGHT) continue;
+    if (y > PAPER_HEIGHT_PX) break;
+    pctx.fillText(responseLines[j], MARGIN_X, y);
   }
 
   // Top-fold overlay: text fades into shadow at the top of the paper,
@@ -1123,9 +1154,9 @@ function skipToEnd() {
     if (!para.endsWith('\n\n')) para = para.replace(/\n*$/, '') + '\n\n';
     textBuffer += para;
   }
+  letterCompleted = true;
   repaintPaper();
   document.getElementById('post-actions')?.classList.add('visible');
-  letterCompleted = true;
   document.body.style.setProperty('--paper-cursor', 'grab');
 }
 
@@ -1185,6 +1216,12 @@ function buildPdfContent(container) {
       row.appendChild(ph);
       container.appendChild(row);
     }
+  }
+  if (responseVisible && responseBuffer.trim().length > 0) {
+    const r = document.createElement('div');
+    r.className = 'pdf-para pdf-response';
+    r.textContent = responseBuffer;
+    container.appendChild(r);
   }
 }
 
@@ -1401,8 +1438,9 @@ async function runLetter() {
     }
     await typeParagraph(para);
   }
-  document.getElementById('post-actions')?.classList.add('visible');
   letterCompleted = true;
+  repaintPaper();
+  document.getElementById('post-actions')?.classList.add('visible');
   document.body.style.setProperty('--paper-cursor', 'grab');
 }
 
@@ -1454,8 +1492,11 @@ window.addEventListener('wheel', (e) => {
   if (e.target.closest('.pdf-transition, #scrollcal-ui, #calibrate-ui, #post-actions')) return;
   if (!isOverPaper(e.clientX, e.clientY)) return;
   e.preventDefault();
-  const lines = wordWrap(textBuffer, MAX_TEXT_WIDTH);
-  const maxScroll = Math.max(0, (lines.length - 1) * LINE_HEIGHT);
+  const showResponse = responseVisible && responseBuffer.length > 0;
+  const letterLines = wordWrap(textBuffer, MAX_TEXT_WIDTH).length;
+  const responseLines = showResponse ? wordWrap(responseBuffer, MAX_TEXT_WIDTH).length : 0;
+  const total = letterLines + responseLines;
+  const maxScroll = Math.max(0, (total - 1) * LINE_HEIGHT);
   scrollOffset = Math.max(0, Math.min(maxScroll, scrollOffset - e.deltaY * 0.5));
   repaintPaper();
 }, { passive: false });
@@ -1473,10 +1514,11 @@ window.addEventListener('keydown', (e) => {
   let c = null;
   if (e.key === 'Enter') c = '\n';
   else if (e.key === 'Backspace') {
-    if (textBuffer.length > 0) {
+    if (responseBuffer.length > 0) {
       e.preventDefault();
-      textBuffer = textBuffer.slice(0, -1);
+      responseBuffer = responseBuffer.slice(0, -1);
       scrollOffset = 0;
+      persistResponse();
       repaintPaper();
       flashKey('backspace');
       playClick();
@@ -1487,8 +1529,9 @@ window.addEventListener('keydown', (e) => {
 
   if (c) {
     e.preventDefault();
-    textBuffer += c;
+    responseBuffer += c;
     scrollOffset = 0;
+    persistResponse();
     repaintPaper();
     if (c === '\n') {
       flashKey('newline');
@@ -1586,6 +1629,23 @@ async function boot() {
   // Replay
   document.getElementById('replay-btn')?.addEventListener('click', () => {
     window.location.reload();
+  });
+
+  // Show/hide toggle for the post-letter response. The response is ALWAYS
+  // persisted to localStorage; the toggle only governs render + PDF inclusion.
+  const toggleBtn = document.getElementById('toggle-response-btn');
+  function refreshToggleBtn() {
+    if (!toggleBtn) return;
+    toggleBtn.textContent = responseVisible ? 'Hide response' : 'Show response';
+    toggleBtn.classList.toggle('is-off', !responseVisible);
+  }
+  refreshToggleBtn();
+  toggleBtn?.addEventListener('click', () => {
+    responseVisible = !responseVisible;
+    persistResponse();
+    refreshToggleBtn();
+    scrollOffset = 0;
+    repaintPaper();
   });
 }
 

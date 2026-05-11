@@ -506,6 +506,18 @@ body.printing { overflow: hidden; }
   white-space: pre-wrap;
 }
 
+.pdf-stage.simple .pdf-response {
+  color: #a51c1c;
+  margin-top: 28px;
+  padding-top: 14px;
+  border-top: 1px dashed rgba(165, 28, 28, 0.45);
+}
+
+.floating-btn.is-off {
+  opacity: 0.62;
+  text-decoration: line-through;
+}
+
 .pdf-stage.simple .pdf-photo-row {
   display: flex;
   gap: 10px;
