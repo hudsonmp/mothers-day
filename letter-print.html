@@ -50,6 +50,13 @@
       margin-top: 8px;
       line-height: 1.1;
     }
+    .response {
+      color: #a51c1c;
+      margin-top: 36px;
+      padding-top: 18px;
+      border-top: 1px dashed rgba(165, 28, 28, 0.45);
+      white-space: pre-wrap;
+    }
     @media print {
       body { padding: 0.6in; }
       .no-print { display: none; }
@@ -96,6 +103,14 @@
       return defaultScenes;
     }
 
+    function loadResponse() {
+      try {
+        const visible = localStorage.getItem('letterResponseVisible');
+        if (visible === '0') return '';
+        return localStorage.getItem('letterResponse') || '';
+      } catch { return ''; }
+    }
+
     const scenes = loadScenes();
     const letterEl = document.getElementById('letter');
     scenes.forEach(scene => {
@@ -124,6 +139,14 @@
         letterEl.appendChild(row);
       }
     });
+
+    const responseText = loadResponse();
+    if (responseText.trim().length > 0) {
+      const r = document.createElement('div');
+      r.className = 'response';
+      r.textContent = responseText;
+      letterEl.appendChild(r);
+    }
 
     // Auto-trigger print dialog after a short pause to let images load
     setTimeout(() => window.print(), 700);
