@@ -476,6 +476,9 @@ html, body {
     padding: 0 !important;
     font-size: 12px !important;
     line-height: 1.65 !important;
+    overflow: visible !important;
+    inset: auto !important;
+    background: white !important;
   }
 }
 
@@ -549,8 +552,18 @@ body.printing { overflow: hidden; }
 }
 
 @media print {
+  @page { margin: 0.5in; }
   .pdf-transition.simple-mode { background: white !important; }
-  .pdf-stage.simple { box-shadow: none !important; max-height: none !important; }
+  .pdf-stage.simple {
+    box-shadow: none !important;
+    max-height: none !important;
+    overflow: visible !important;
+    width: 100% !important;
+    padding: 0 !important;
+  }
+  .pdf-stage.simple .pdf-photo-row { page-break-inside: avoid; }
+  .pdf-stage.simple .pdf-para,
+  .pdf-stage.simple .pdf-response { page-break-inside: auto; }
   .pdf-actions { display: none !important; }
 }
 
