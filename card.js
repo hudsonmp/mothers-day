@@ -133,7 +133,25 @@ const MAX_TEXT_WIDTH = PAPER_WIDTH_PX - MARGIN_X * 2;
 // Three.js scene setup — 3/4 hero shot
 // =============================================================
 const canvas = document.getElementById('scene');
-const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+let renderer;
+try {
+  renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+} catch (err) {
+  // WebGL unavailable (GPU process crashed, hardware accel off, too many
+  // GL contexts, etc.). Without this guard, the throw propagates from a
+  // top-level ESM statement and silently halts the whole module — the
+  // loading screen never clears. Surface the failure instead.
+  const loading = document.getElementById('loading');
+  if (loading) {
+    loading.innerHTML = `
+      <div class="loading-text" style="line-height:1.6;text-align:center;max-width:480px">
+        WebGL isn't available in this browser session.<br>
+        Open <code>chrome://gpu</code> to check status,<br>
+        or quit and re-open Chrome to reset the GPU process.
+      </div>`;
+  }
+  throw err;
+}
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 renderer.setSize(window.innerWidth, window.innerHeight);
 renderer.outputColorSpace = THREE.SRGBColorSpace;
