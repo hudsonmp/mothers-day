@@ -14,3 +14,10 @@ Thumbs.db
 # of mom don't end up on a public GitHub repo by accident.
 assets/photos/*
 !assets/photos/.gitkeep
+# Vercel CLI link state + per-machine deploy excludes
+.vercel
+.vercelignore
+
+# Personal scenes backup (don't commit)
+.hudson-personal-scenes.json
+hudson-scenes.json

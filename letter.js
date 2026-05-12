@@ -1,27 +1,22 @@
 // =============================================================
-// letter.js — the only file Hudson edits to swap in real content.
+// letter.js — placeholder template. Edit via /edit or replace
+// these scenes directly. Each scene is one paragraph + optional
+// polaroid + optional doodle. Polaroids/doodles render before
+// the paragraph types, so they accompany the text.
 //
-// Each scene is one paragraph + an optional polaroid + an optional
-// doodle. Polaroids and doodles appear BEFORE their paragraph types,
-// so they accompany the text rather than interrupting it.
-//
-// "position" is in normalized viewport coords [0..1] from top-left.
-// e.g. {x: 0.85, y: 0.4} = 85% across, 40% down.
+// Once you set scenes via /edit they're saved to localStorage
+// and override this file. To deploy a baked version, replace
+// these objects with your content.
 // =============================================================
 
 export const scenes = [
   {
-    paragraph: "Mom,\n\nIt's been a year of trolleys and cold emails. None of it would have happened without you.\n\n",
-    polaroid: {
-      src: "assets/photos/photo1.jpg",
-      caption: "first day at UCSD",
-      position: { x: 0.85, y: 0.35 },
-      tilt: -4,
-    },
+    paragraph: "Mom,\n\nThis is the placeholder letter. Open /edit to write your own — your scenes save to localStorage and load automatically.\n\n",
+    polaroid: null,
     doodle: null,
   },
   {
-    paragraph: "I think about the drive to the trolley station every morning. You never made me feel like a burden, even when I was asking for the fifth ride that week.\n\n",
+    paragraph: "Each paragraph types onto the page at reading speed. Add a polaroid or a doodle per scene and they appear alongside the text.\n\n",
     polaroid: null,
     doodle: {
       src: "assets/doodles/heart.svg",
@@ -30,28 +25,9 @@ export const scenes = [
     },
   },
   {
-    paragraph: "Thank you for trusting me to drop out. Most parents wouldn't have. You read the EV email, looked at me, and said \"do it.\"\n\n",
-    polaroid: {
-      src: "assets/photos/photo2.jpg",
-      caption: "EV grant day",
-      position: { x: 0.86, y: 0.65 },
-      tilt: 5,
-    },
+    paragraph: "When you're done, scroll back through the letter, type a response in red, or save it as a PDF.\n\n— the template",
+    polaroid: null,
     doodle: null,
-  },
-  {
-    paragraph: "I love you. I'll bring you to CMU when I get there.\n\n— Hudson",
-    polaroid: {
-      src: "assets/photos/photo3.jpg",
-      caption: "us, last summer",
-      position: { x: 0.14, y: 0.78 },
-      tilt: 3,
-    },
-    doodle: {
-      src: "assets/doodles/flower.svg",
-      position: { x: 0.88, y: 0.85 },
-      rotation: 12,
-    },
   },
 ];
 

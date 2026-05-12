@@ -2,6 +2,8 @@
 
 A photoreal 3D typewriter that types a handwritten letter character-by-character, with polaroid photos developing alongside paragraphs and hand-drawn doodles in the margins.
 
+**Open source** (MIT). Bring your own letter, your own photos, your own doodles, your own deploy. No accounts, no tracking, no shared backend — your content lives in your browser's localStorage and only on whatever host you deploy it to.
+
 ## What's in the box
 
 ```
@@ -94,8 +96,35 @@ In `card.js` look for `delayForChar`. Tune these to match how your mom would rea
 - `\n` → 600ms + bell (paragraph break)
 - default → 50–90ms jitter (typing rhythm)
 
+## Deploy
+
+This is a static site — `index.html` is the entry. Any host that serves files works.
+
+### Vercel (recommended, free tier)
+```bash
+npm i -g vercel
+vercel --prod
+```
+First run links the directory to a new Vercel project. **Vercel teams default to SSO Deployment Protection** — disable it on this project so your recipient doesn't hit a 401:
+```bash
+vercel project protection disable <project-name> --sso
+```
+Custom domains bypass SSO automatically; auto-generated `*.vercel.app` aliases don't.
+
+### Railway / Cloudflare Pages / Netlify / GitHub Pages
+All work the same way — point the host at this repo's root, no build command, no output directory (it serves `.` directly). The 70MB `assets/typewriter.glb` is well under any free tier's per-file limit but check your monthly bandwidth allowance if you expect heavy traffic.
+
+### Privacy posture
+- The personal photos in `assets/photos/` are **gitignored** so they never end up on a public GitHub fork. They DO get uploaded to whichever host you deploy to (Vercel / Railway / etc.) — anyone with the photo URL can fetch them.
+- Use `.vercelignore` (or your host's equivalent) to swap in deploy-specific exclusions without touching `.gitignore`.
+- For zero-server delivery, `letter-print.html` opens in a new tab as a fully self-contained print view.
+
 ## Credits
 
 - Typewriter model: [Inlet via Sketchfab](https://sketchfab.com/3d-models/typewriter-rigged-and-ready-for-animation-3e206596358446069e3c3b9bf04830ef) (placeholder fallback uses Inlet's name in attribution; swap if using Underwood)
 - Sounds: Pixabay (CC0)
 - Built with Three.js + GSAP, no build step.
+
+## License
+
+MIT — see [LICENSE](./LICENSE). Bundled GLBs / sounds carry their own licenses (CC-BY-NC-SA for the Underwood typewriter; CC0 for Pixabay sounds).
